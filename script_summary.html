@@ -1,0 +1,840 @@
+<script>
+    function loadClassroomSummary() {
+        try {
+            console.log('Loading classroom summary');
+            $("#summary-classroom").val("");
+            $("#summary-date").val(checkDateExpiration("summary-date", TODAY));
+            $("#summary-period-buttons .period-btn").removeClass("active bg-indigo-600 text-white").addClass("text-gray-700 bg-white");
+            $("#summary-period-buttons .period-btn[data-period='morning']").addClass("active bg-indigo-600 text-white").removeClass("text-gray-700 bg-white");
+            $("#classroom-summary-list").empty();
+            $("#classroom-students-list").empty();
+            if (window.classroomPieChart) {
+                window.classroomPieChart.destroy();
+                window.classroomPieChart = null;
+            }
+            if (window.classroomBarChart) {
+                window.classroomBarChart.destroy();
+                window.classroomBarChart = null;
+            }
+            $("#empty-dashboard").show();
+            $("#classroom-chart-container").hide();
+            $("#classroom-table-container").hide();
+            $("#classroom-students-list-container").hide();
+            // Removed line related to classroom-preview-btn
+            loadClassroomsDropdown("#summary-classroom");
+            updateClassroomSummaryTitle();
+        } catch (error) {
+            console.error('Error in loadClassroomSummary:', error);
+            Swal.fire({
+                icon: 'error',
+                title: 'ข้อผิดพลาด',
+                text: 'เกิดข้อผิดพลาดในการโหลดสรุปตามห้องเรียน: ' + error.message,
+                confirmButtonText: 'ตกลง'
+            });
+        }
+    }
+
+    async function updateClassroomSummaryTitle() {
+        try {
+            const classroomId = $("#summary-classroom").val();
+            const date = $("#summary-date").val() || TODAY;
+            const period = $("#summary-period-buttons .period-btn.active").data("period") || 'morning';
+            const periodName = period ? PERIODS.find(p => p.id === period)?.name || period : 'เช้า';
+            
+            const teacher = JSON.parse(localStorage.getItem("teacher") || "{}");
+            if (!teacher || !teacher.classroom_ids) {
+                // If no teacher data, set a default title and return
+                const schoolName = CONFIG.school_config.schoolName || 'โรงเรียน';
+                 $("#classroom-summary-title").html(`
+                    สรุปเช็คชื่อนักเรียน ห้อง -- เลือกห้องเรียน --<br>
+                    ${schoolName}<br>
+                    วันที่ ${formatDateThai(date)} ช่วง${periodName}
+                `);
+                return;
+            }
+            const allowedClassroomIds = teacher.classroom_ids;
+
+            $.LoadingOverlay("show");
+            const response = await runGoogleScript('getClassrooms', allowedClassroomIds);
+            $.LoadingOverlay("hide"); // Hide overlay after script run
+
+            let classroomName = '-- เลือกห้องเรียน --';
+            const schoolName = CONFIG.school_config.schoolName || 'โรงเรียน';
+
+            if (response.status === 'success') {
+                const classrooms = response.data;
+                 if (classrooms && classrooms.length > 0 && classroomId) {
+                    classroomName = classrooms.find(c => c.id === classroomId)?.name || classroomId;
+                }
+            } else {
+                console.warn(response.error.details || 'Failed to load classrooms for title');
+                // Keep classroomName as '-- เลือกห้องเรียน --' or classroomId if it exists
+                if (classroomId) classroomName = classroomId;
+            }
+            
+            $("#classroom-summary-title").html(`
+                สรุปเช็คชื่อนักเรียน ห้อง ${classroomName}<br>
+                ${schoolName}<br>
+                วันที่ ${formatDateThai(date)} ช่วง${periodName}
+            `);
+        } catch (error) {
+            $.LoadingOverlay("hide");
+            console.error('Error in updateClassroomSummaryTitle:', error);
+             const date = $("#summary-date").val() || TODAY;
+            const period = $("#summary-period-buttons .period-btn.active").data("period") || 'morning';
+            const periodName = period ? PERIODS.find(p => p.id === period)?.name || period : 'เช้า';
+            const schoolName = CONFIG.school_config.schoolName || 'โรงเรียน';
+            $("#classroom-summary-title").html(`
+                สรุปเช็คชื่อนักเรียน ห้อง -- เลือกห้องเรียน --<br>
+                ${schoolName}<br>
+                วันที่ ${formatDateThai(date)} ช่วง${periodName}
+            `);
+            Swal.fire({
+                icon: 'error',
+                title: 'ข้อผิดพลาด',
+                text: 'เกิดข้อผิดพลาดในการอัปเดตหัวข้อสรุปห้องเรียน: ' + error.message,
+                confirmButtonText: 'ตกลง'
+            });
+        }
+    }
+
+    async function loadClassroomsDropdown(containerId) { // This function is duplicated in script_main, ensure consistency or refactor
+        try {
+            console.log('Loading classrooms dropdown for container:', containerId);
+            const classroomSelect = $(containerId);
+            classroomSelect.empty();
+            classroomSelect.append('<option value="">-- เลือกห้องเรียน --</option>');
+            const teacher = JSON.parse(localStorage.getItem("teacher") || "{}");
+             if (!teacher || !teacher.classroom_ids || !Array.isArray(teacher.classroom_ids) || teacher.classroom_ids.length === 0) {
+                console.warn('No teacher data or classroom_ids for dropdown');
+                return;
+            }
+            const allowedClassroomIds = teacher.classroom_ids;
+
+            $.LoadingOverlay("show");
+            const response = await runGoogleScript('getClassrooms', allowedClassroomIds);
+            $.LoadingOverlay("hide");
+            if (response.status !== 'success') {
+                throw new Error(response.error.details || 'Failed to load classrooms');
+            }
+            const classrooms = response.data;
+            if (!classrooms || !classrooms.length) {
+                 console.warn('No classrooms returned from server for dropdown');
+                return;
+            }
+            classrooms.forEach(classroom => {
+                if (allowedClassroomIds.includes(classroom.id)) {
+                    classroomSelect.append(`<option value="${classroom.id}">${classroom.name}</option>`);
+                }
+            });
+            if (classroomSelect.find('option').length <= 1) {
+                console.warn('No allowed classrooms to populate dropdown');
+            }
+        } catch (error) {
+            $.LoadingOverlay("hide");
+            console.error('Error in loadClassroomsDropdown (summary):', error);
+            // Avoid Swal here if it's too disruptive for a dropdown load failure
+        }
+    }
+
+    async function loadClassroomSummaryData(classroomId, date, period) {
+        try {
+            $.LoadingOverlay("show");
+            console.log('Loading classroom summary data for:', { classroomId, date, period });
+
+            const attendanceResponse = await runGoogleScript('getAttendance', date, period, classroomId);
+            if (attendanceResponse.status !== 'success') {
+                throw new Error(attendanceResponse.error.details || 'Failed to load attendance data');
+            }
+            const attendanceLog = attendanceResponse.data;
+            const filteredData = attendanceLog.filter(entry =>
+                entry.room_id === classroomId &&
+                entry.date === date &&
+                entry.period === period
+            ).sort((a, b) => new Date(b.updated_at || b.date) - new Date(a.updated_at || b.date));
+            
+            if (filteredData.length === 0) {
+                $.LoadingOverlay("hide");
+                Swal.fire({
+                    icon: 'info',
+                    title: 'ไม่พบข้อมูล',
+                    text: 'ยังไม่มีข้อมูลการเช็คชื่อสำหรับห้องเรียน วันที่ และช่วงเวลาที่เลือก',
+                    confirmButtonText: 'ตกลง'
+                });
+                $("#classroom-chart-container").hide();
+                $("#classroom-table-container").hide();
+                $("#classroom-students-list-container").hide();
+                // Removed line related to classroom-preview-btn
+                $("#empty-dashboard").show();
+                return;
+            }
+
+            const studentResponse = await runGoogleScript('getStudents', [classroomId]);
+            if (studentResponse.status !== 'success') {
+                throw new Error(studentResponse.error.details || 'Failed to load students');
+            }
+            const studentsByClassroom = studentResponse.data;
+            const students = studentsByClassroom[classroomId] || [];
+
+            const latestEntry = filteredData[0];
+            const statusCounts = {};
+            STATUS_LIST.forEach(status => {
+                statusCounts[status.label] = 0;
+            });
+            
+            const allStudents = [];
+            latestEntry.students.forEach(student => {
+                if (statusCounts[student.status] !== undefined) {
+                    statusCounts[student.status]++;
+                } else {
+                    console.warn('Unknown status found:', student.status);
+                }
+                const studentData = students.find(s => String(s.student_id) === String(student.student_id));
+                if (studentData) {
+                    allStudents.push({
+                        student_id: student.student_id,
+                        no: studentData.no,
+                        name: studentData.name,
+                        status: student.status,
+                        reason: student.reason || ''
+                    });
+                }
+            });
+            
+            const tableData = [{
+                date: latestEntry.date,
+                period: PERIODS.find(p => p.id === latestEntry.period)?.name || latestEntry.period,
+                counts: statusCounts
+            }];
+
+            updateClassroomTable(tableData, allStudents.length);
+            updateClassroomCharts(statusCounts);
+            updateClassroomStudentsList(allStudents);
+
+            $("#classroom-table-container").show();
+            $("#classroom-chart-container").show();
+            $("#classroom-students-list-container").show();
+            // Removed lines related to classroom-preview-btn
+            $("#empty-dashboard").hide();
+
+            // Removed event listener for classroom-preview-btn
+
+            $.LoadingOverlay("hide");
+        } catch (error) {
+            $.LoadingOverlay("hide");
+            console.error('Error in loadClassroomSummaryData:', error);
+            Swal.fire({
+                icon: 'error',
+                title: 'ข้อผิดพลาด',
+                text: 'เกิดข้อผิดพลาดในการโหลดข้อมูลสรุป: ' + error.message,
+                confirmButtonText: 'ตกลง'
+            });
+        }
+    }
+
+    function updateClassroomCharts(statusCounts) {
+        try {
+            const pieCanvas = document.getElementById('classroom-pie-chart');
+            if (!pieCanvas) {
+                // console.warn('Canvas for classroom pie chart not found.');
+                return;
+            }
+            const pieCtx = pieCanvas.getContext('2d');
+            if (window.classroomPieChart) {
+                window.classroomPieChart.destroy();
+            }
+            window.classroomPieChart = new Chart(pieCtx, {
+                type: 'pie',
+                data: {
+                    labels: STATUS_LIST.map(status => status.label),
+                    datasets: [{
+                        data: STATUS_LIST.map(status => statusCounts[status.label] || 0),
+                        backgroundColor: STATUS_LIST.map(status => status.hexColor)
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'right' },
+                        title: {
+                            display: true,
+                            text: 'สัดส่วนสถานะการเข้าเรียน'
+                        }
+                    },
+                    layout: {
+                        padding: 10
+                    }
+                }
+            });
+
+            const barCanvas = document.getElementById('classroom-bar-chart');
+             if (!barCanvas) {
+                // console.warn('Canvas for classroom bar chart not found.');
+                return;
+            }
+            const barCtx = barCanvas.getContext('2d');
+            if (window.classroomBarChart) {
+                window.classroomBarChart.destroy();
+            }
+            window.classroomBarChart = new Chart(barCtx, {
+                type: 'bar',
+                data: {
+                    labels: STATUS_LIST.map(status => status.label),
+                    datasets: [{
+                        label: 'จำนวนนักเรียน',
+                        data: STATUS_LIST.map(status => statusCounts[status.label] || 0),
+                        backgroundColor: STATUS_LIST.map(status => status.hexColor)
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        title: {
+                            display: true,
+                            text: 'จำนวนนักเรียนตามสถานะการเข้าเรียน'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: { precision: 0 }
+                        }
+                    },
+                    layout: {
+                        padding: {
+                            top: 10,
+                            bottom: 10
+                        }
+                    }
+                }
+            });
+
+            const pieChartCard = $('#classroom-pie-chart').closest('.bg-white.rounded-lg.shadow.p-4');
+            if (pieChartCard.length) {
+                 $('#classroom-pie-chart').css({ 'width': '100%', 'height': '300px' });
+            }
+
+
+            const barChartCard = $('#classroom-bar-chart').closest('.bg-white.rounded-lg.shadow.p-4');
+             if (barChartCard.length) {
+                $('#classroom-bar-chart').css({ 'width': '100%', 'height': '300px' });
+            }
+
+        } catch (error) {
+            console.error('Error in updateClassroomCharts:', error);
+            // Avoid Swal here as it can be too disruptive if charts fail repeatedly
+        }
+    }
+
+    function updateClassroomTable(tableData, totalStudents) {
+        try {
+            const container = $("#classroom-summary-list");
+            container.empty();
+            
+            tableData.forEach(entry => {
+                const totalCard = `
+                    <div class="p-4 text-center rounded-lg shadow-sm" style="background-color: ${lightenColor('#e5e7eb', 20)}; color: #374151;">
+                        <div class="flex items-center justify-center mb-2">
+                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                            </svg>
+                            <h3 class="text-sm font-medium">นักเรียนทั้งหมด</h3>
+                        </div>
+                        <p class="text-lg font-semibold">${totalStudents} คน</p>
+                        <p class="text-xs text-gray-500">(100%)</p>
+                    </div>
+                `;
+
+                const cards = STATUS_LIST.map(status => {
+                    const count = entry.counts[status.label] || 0;
+                    const percentage = totalStudents > 0 ? ((count / totalStudents) * 100).toFixed(2) : 0;
+                    const hexColor = status.hexColor || '#000000';
+                    const lighterColor = lightenColor(hexColor, 80);
+                    const darkerColor = darkenColor(hexColor, 20);
+                    return `
+                        <div class="p-4 text-center rounded-lg shadow-sm" style="background-color: ${lighterColor}; color: ${darkerColor};">
+                            <div class="flex items-center justify-center mb-2">
+                                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+                                </svg>
+                                <h3 class="text-sm font-medium">${status.label}</h3>
+                            </div>
+                            <p class="text-lg font-semibold">${count} คน</p>
+                            <p class="text-xs text-gray-500">(${percentage}%)</p>
+                        </div>
+                    `;
+                }).join('');
+                
+                container.append(`
+                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
+                        ${totalCard}
+                        ${cards}
+                    </div>
+                `);
+            });
+        } catch (error) {
+            console.error('Error in updateClassroomTable:', error);
+            // Avoid Swal here
+        }
+    }
+
+    function updateClassroomStudentsList(studentList) {
+        try {
+            const studentsList = $("#classroom-students-list");
+            studentsList.empty();
+            
+            if (studentList.length === 0) {
+                studentsList.append('<tr><td colspan="4" class="px-6 py-4 text-center text-gray-500">ไม่มีข้อมูลนักเรียน</td></tr>');
+                return;
+            }
+
+            studentList.forEach(student => {
+                const row = `
+                    <tr class="border-b border-gray-200">
+                        <td class="px-6 py-4 whitespace-nowrap border-r border-gray-200">${student.student_id}</td>
+                        <td class="px-6 py-4 whitespace-nowrap border-r border-gray-200">${student.no}</td>
+                        <td class="px-6 py-4 whitespace-nowrap border-r border-gray-200">${student.name}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">${student.status}${student.reason ? ` (${student.reason})` : ''}</td>
+                    </tr>
+                `;
+                studentsList.append(row);
+            });
+
+            const table = studentsList.closest('table');
+            table.addClass('min-w-full w-full border');
+            table.closest('.table-responsive').addClass('w-full');
+            table.find('thead tr').addClass('bg-gradient-to-r from-blue-400 to-teal-400 text-white border-b border-gray-300');
+            table.find('thead th').addClass('border-r border-gray-300 font-bold');
+            table.find('thead th:last-child').removeClass('border-r');
+            table.find('tbody tr td:last-child').removeClass('border-r');
+        } catch (error) {
+            console.error('Error in updateClassroomStudentsList:', error);
+            // Avoid Swal here
+        }
+    }
+
+    // Removed openClassroomPreviewModal function
+    // Removed downloadClassroomPng function
+    // Removed downloadClassroomPdf function
+    // Removed printClassroom function
+
+    function loadOverallSummary() {
+        try {
+            console.log('Loading overall summary');
+            const date = $("#overall-date").val() || TODAY;
+            let period = $("#overall-period-buttons .period-btn.active").data("period");
+            if (!period) {
+                period = "morning";
+                $("#overall-period-buttons .period-btn[data-period='morning']").addClass("active bg-indigo-600 text-white").removeClass("text-gray-700 bg-white");
+            }
+            $("#overall-chart-container").hide();
+            $("#overall-table-container").hide();
+            $("#overall-status-summary").hide();
+            // Removed line related to overall-preview-btn
+            $("#overall-empty-dashboard").show();
+             updateOverallSummaryTitle(); // Call title update here
+            if (date && period) {
+                loadOverallSummaryData(date, period);
+            } else {
+                console.warn('Missing date or period for overall summary');
+            }
+        } catch (error) {
+            console.error('Error in loadOverallSummary:', error);
+            Swal.fire({
+                icon: 'error',
+                title: 'ข้อผิดพลาด',
+                text: 'เกิดข้อผิดพลาดในการโหลดสรุปภาพรวม: ' + error.message,
+                confirmButtonText: 'ตกลง'
+            });
+        }
+    }
+
+    function updateOverallSummaryTitle() {
+        try {
+            const date = $("#overall-date").val() || TODAY;
+            const period = $("#overall-period-buttons .period-btn.active").data("period") || 'morning';
+            const periodName = period ? PERIODS.find(p => p.id === period)?.name || period : 'เช้า';
+            
+            const schoolName = CONFIG.school_config.schoolName || 'โรงเรียน';
+            $("#overall-summary-title").html(`
+                สรุปเช็คชื่อนักเรียนทั้งโรงเรียน<br>
+                ${schoolName}<br>
+                วันที่ ${formatDateThai(date)} ช่วง${periodName}
+            `);
+        } catch (error) {
+            console.error('Error in updateOverallSummaryTitle:', error);
+            // Avoid Swal here
+        }
+    }
+
+    async function loadOverallSummaryData(date, period) {
+        try {
+            $.LoadingOverlay("show");
+            console.log('Loading overall summary data for date:', date, 'and period:', period);
+
+            const classroomResponse = await runGoogleScript('getClassrooms', []);
+            if (classroomResponse.status !== 'success') {
+                throw new Error(classroomResponse.error.details || 'Failed to load classrooms');
+            }
+            const allClassrooms = classroomResponse.data;
+
+            const attendanceResponse = await runGoogleScript('getAttendance', date, period, null);
+            if (attendanceResponse.status !== 'success') {
+                throw new Error(attendanceResponse.error.details || 'Failed to load attendance data');
+            }
+            const attendanceLog = attendanceResponse.data;
+            const filteredData = attendanceLog.filter(entry => 
+                entry.date === date && 
+                entry.period === period
+            ).sort((a, b) => new Date(b.updated_at || b.date) - new Date(a.updated_at || b.date));
+            
+            if (filteredData.length === 0 && (!allClassrooms || allClassrooms.length === 0)) {
+                $.LoadingOverlay("hide");
+                Swal.fire({
+                    icon: 'info',
+                    title: 'ไม่พบข้อมูล',
+                    text: 'ยังไม่มีข้อมูลการเช็คชื่อสำหรับวันที่และช่วงเวลาที่เลือก และไม่มีห้องเรียนในระบบ',
+                    confirmButtonText: 'ตกลง'
+                });
+                $("#overall-chart-container").hide();
+                $("#overall-table-container").hide();
+                $("#overall-status-summary").hide();
+                // Removed line related to overall-preview-btn
+                $("#overall-empty-dashboard").show();
+                return;
+            }
+
+            const studentResponse = await runGoogleScript('getStudents', allClassrooms.map(c => c.id));
+            if (studentResponse.status !== 'success') {
+                throw new Error(studentResponse.error.details || 'Failed to load students');
+            }
+            const studentsByClassroom = studentResponse.data;
+
+            const statusCounts = {};
+            STATUS_LIST.forEach(status => {
+                statusCounts[status.label] = 0;
+            });
+            
+            const tableData = [];
+            const statusStudents = {};
+            STATUS_LIST.forEach(status => {
+                if (status.label !== "มา") {
+                    statusStudents[status.label] = [];
+                }
+            });
+            const latestEntries = {};
+            filteredData.forEach(entry => {
+                if (!latestEntries[entry.room_id] || new Date(entry.updated_at || entry.date) > new Date(latestEntries[entry.room_id].updated_at || entry.date)) {
+                    latestEntries[entry.room_id] = entry;
+                }
+            });
+
+            let totalStudents = 0;
+            allClassrooms.forEach(classroom => {
+                const dayCounts = {};
+                STATUS_LIST.forEach(status => {
+                    dayCounts[status.label] = 0;
+                });
+
+                const entry = latestEntries[classroom.id];
+                if (entry) {
+                    entry.students.forEach(student => {
+                        if (statusCounts[student.status] !== undefined) {
+                            statusCounts[student.status]++;
+                            dayCounts[student.status]++;
+                        } else {
+                            console.warn('Unknown status found:', student.status);
+                        }
+                        const studentData = studentsByClassroom[classroom.id]?.find(s => String(s.student_id) === String(student.student_id));
+                        if (studentData && student.status !== "มา") {
+                            if (statusStudents[student.status]) {
+                                statusStudents[student.status].push({
+                                    classroom: classroom.name,
+                                    student_id: student.student_id,
+                                    no: studentData.no,
+                                    name: studentData.name,
+                                    status: student.status,
+                                    reason: student.reason || ''
+                                });
+                            }
+                        }
+                    });
+                }
+
+                const studentCount = studentsByClassroom[classroom.id]?.length || 0;
+                totalStudents += studentCount;
+                const periodName = PERIODS.find(p => p.id === period)?.name || period;
+                tableData.push({
+                    date: date,
+                    classroom: classroom.name,
+                    period: periodName,
+                    counts: dayCounts,
+                    studentCount: studentCount,
+                    checked: !!entry,
+                    classroomId: classroom.id
+                });
+            });
+
+            updateOverallTable(tableData, statusCounts, totalStudents);
+            updateOverallCharts(statusCounts);
+            updateOverallStatusSummary(statusStudents);
+            
+            $("#overall-table-container").show();
+            $("#overall-chart-container").show();
+            $("#overall-status-summary").show();
+            // Removed lines related to overall-preview-btn
+            $("#overall-empty-dashboard").hide();
+
+            // Removed event listener for overall-preview-btn
+            
+            $.LoadingOverlay("hide");
+        } catch (error) {
+            $.LoadingOverlay("hide");
+            console.error('Error in loadOverallSummaryData:', error);
+            Swal.fire({
+                icon: 'error',
+                title: 'ข้อผิดพลาด',
+                text: 'เกิดข้อผิดพลาดในการโหลดข้อมูลสรุปทั้งโรงเรียน: ' + error.message,
+                confirmButtonText: 'ตกลง'
+            });
+        }
+    }
+
+    function updateOverallCharts(statusCounts) {
+        try {
+            const pieCanvas = document.getElementById('overall-pie-chart');
+            if (!pieCanvas) {
+                // console.warn('Canvas for overall pie chart not found.');
+                return;
+            }
+            const pieCtx = pieCanvas.getContext('2d');
+            if (window.overallPieChart) {
+                window.overallPieChart.destroy();
+            }
+            window.overallPieChart = new Chart(pieCtx, {
+                type: 'pie',
+                data: {
+                    labels: STATUS_LIST.map(status => status.label),
+                    datasets: [{
+                        data: STATUS_LIST.map(status => statusCounts[status.label] || 0),
+                        backgroundColor: STATUS_LIST.map(status => status.hexColor)
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'right' },
+                        title: {
+                            display: true,
+                            text: 'สัดส่วนสถานะการเข้าเรียนทั้งโรงเรียน'
+                        }
+                    },
+                    layout: {
+                        padding: 10
+                    }
+                }
+            });
+
+            const barCanvas = document.getElementById('overall-bar-chart');
+            if (!barCanvas) {
+                // console.warn('Canvas for overall bar chart not found.');
+                return;
+            }
+            const barCtx = barCanvas.getContext('2d');
+            if (window.overallBarChart) {
+                window.overallBarChart.destroy();
+            }
+            window.overallBarChart = new Chart(barCtx, {
+                type: 'bar',
+                data: {
+                    labels: STATUS_LIST.map(status => status.label),
+                    datasets: [{
+                        label: 'จำนวนนักเรียน',
+                        data: STATUS_LIST.map(status => statusCounts[status.label] || 0),
+                        backgroundColor: STATUS_LIST.map(status => status.hexColor)
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        title: {
+                            display: true,
+                            text: 'จำนวนนักเรียนตามสถานะการเข้าเรียนทั้งโรงเรียน'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: { precision: 0 }
+                        }
+                    },
+                    layout: {
+                        padding: {
+                            top: 10,
+                            bottom: 10
+                        }
+                    }
+                }
+            });
+
+            const pieChartCard = $('#overall-pie-chart').closest('.bg-white.rounded-lg.shadow.p-4');
+             if (pieChartCard.length) {
+                $('#overall-pie-chart').css({ 'width': '100%', 'height': '300px' });
+            }
+
+            const barChartCard = $('#overall-bar-chart').closest('.bg-white.rounded-lg.shadow.p-4');
+            if (barChartCard.length) {
+                $('#overall-bar-chart').css({ 'width': '100%', 'height': '300px' });
+            }
+
+        } catch (error) {
+            console.error('Error in updateOverallCharts:', error);
+            // Avoid Swal here
+        }
+    }
+
+    function updateOverallTable(tableData, statusCounts, totalStudents) {
+        try {
+            const tableHead = $("#overall-summary-thead");
+            const tableBody = $("#overall-summary-list");
+            tableHead.empty();
+            tableBody.empty();
+            
+            const headers = `
+                <tr class="bg-gradient-to-r from-indigo-500 to-purple-500 text-white border-b border-gray-300">
+                    <th class="px-6 py-3 text-center text-xs font-medium uppercase tracking-wider rounded-tl-lg border-r border-gray-300">ห้องเรียน</th>
+                    <th class="px-6 py-3 text-center text-xs font-medium uppercase tracking-wider border-r border-gray-300">นักเรียน</th>
+                    ${STATUS_LIST.map(status => `
+                        <th class="px-1 py-1 text-center text-xs font-medium uppercase tracking-wider border-r border-gray-300">${status.label}</th>
+                    `).join('')}
+                    <th class="px-6 py-3 text-center text-xs font-medium uppercase tracking-wider rounded-tr-lg border-r border-gray-300">สถานะ</th>
+                </tr>
+            `;
+            tableHead.append(headers);
+            
+            tableData.sort((a, b) => a.classroom.localeCompare(b.classroom));
+            tableData.forEach((entry, index) => {
+                const isEven = index % 2 === 0;
+                const rowColor = isEven ? 'bg-gray-50' : 'bg-white';
+                const statusText = entry.checked
+                    ? `<span class="text-green-600">เช็คชื่อแล้ว</span>`
+                    : `<span class="text-red-600">ยังไม่ได้เช็คชื่อ</span>`;
+                const row = `
+                    <tr class="${rowColor} hover:bg-gray-100 transition-colors border-b border-gray-200">
+                        <td class="px-6 py-4 text-center whitespace-nowrap border-r border-gray-200">${entry.classroom}</td>
+                        <td class="px-6 py-4 text-center whitespace-nowrap border-r border-gray-200">${entry.studentCount}</td>
+                        ${STATUS_LIST.map(status => `
+                            <td class="px-1 py-1 text-center whitespace-nowrap border-r border-gray-200" style="color: ${darkenColor(status.hexColor, 20)};">${entry.counts[status.label] || 0}</td>
+                        `).join('')}
+                        <td class="px-6 py-4 text-center whitespace-nowrap border-r border-gray-200">${statusText}</td>
+                    </tr>
+                `;
+                tableBody.append(row);
+            });
+            
+            const summaryRow = `
+                <tr class="font-bold bg-indigo-100 border-t border-b border-gray-200">
+                    <td class="px-6 py-4 text-center whitespace-nowrap border-r border-gray-200">รวม</td>
+                    <td class="px-6 py-4 text-center whitespace-nowrap border-r border-gray-200">${totalStudents}</td>
+                    ${STATUS_LIST.map(status => `
+                        <td class="px-1 py-1 text-center whitespace-nowrap border-r border-gray-200" style="color: ${darkenColor(status.hexColor, 20)};">${statusCounts[status.label] || 0}</td>
+                    `).join('')}
+                    <td class="px-6 py-4 whitespace-nowrap border-r border-gray-200"></td>
+                </tr>
+                <tr class="font-bold bg-indigo-50">
+                    <td colspan="2" class="px-6 py-4 text-center whitespace-nowrap rounded-bl-lg border-r border-gray-200">%</td>
+                    ${STATUS_LIST.map(status => `
+                        <td class="px-1 py-1 text-center whitespace-nowrap border-r border-gray-200" style="color: ${darkenColor(status.hexColor, 20)};">${totalStudents > 0 ? ((statusCounts[status.label] / totalStudents) * 100).toFixed(2) : 0}%</td>
+                    `).join('')}
+                    <td class="px-6 py-4 whitespace-nowrap rounded-br-lg border-r border-gray-200"></td>
+                </tr>
+            `;
+            tableBody.append(summaryRow);
+
+            tableBody.find('tr td:last-child').removeClass('border-r');
+            tableBody.closest('table').removeClass('border');
+        } catch (error) {
+            console.error('Error in updateOverallTable:', error);
+            // Avoid Swal here
+        }
+    }
+
+    function updateOverallStatusSummary(statusStudents) {
+        try {
+            const statusCards = $("#status-cards");
+            statusCards.empty();
+
+            $("#overall-status-summary h3").text("สรุปสถานะนักเรียนที่มีสถานะนอกจากมาปกติ");
+
+            let tableRows = '';
+            STATUS_LIST.forEach(status => {
+                if (status.label !== "มา") {
+                    const students = statusStudents[status.label] || [];
+                    const count = students.length;
+                    if (count > 0) {
+                        const statusColor = status.hexColor || '#000000';
+                        const lighterColor = lightenColor(statusColor, 40);
+                        const darkerColor = darkenColor(statusColor, 20);
+                        tableRows += `
+                            <tr class="bg-gray-100">
+                                <td colspan="4" class="px-6 py-3 font-bold text-left" style="background-color: ${lighterColor}; color: ${darkerColor};">
+                                    ${status.label} (${count})
+                                </td>
+                            </tr>
+                        `;
+                        students.forEach(student => {
+                            tableRows += `
+                                <tr class="border-b border-gray-200">
+                                    <td class="px-6 py-4 whitespace-nowrap border-r border-gray-200">${student.classroom}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap border-r border-gray-200">${student.no}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap border-r border-gray-200">${student.name}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap">${student.status}${student.reason ? ` (${student.reason})` : ''}</td>
+                                </tr>
+                            `;
+                        });
+                    }
+                }
+            });
+
+            if (tableRows) {
+                const table = `
+                    <div class="table-responsive w-full">
+                        <table class="min-w-full w-full bg-white border-0">
+                            <thead>
+                                <tr class="bg-gradient-to-r from-indigo-300 to-purple-300 text-white border-b border-gray-300">
+                                    <th class="px-6 py-3 text-left text-sm font-bold uppercase tracking-wider rounded-tl-lg border-r border-gray-300">ห้องเรียน</th>
+                                    <th class="px-6 py-3 text-left text-sm font-bold uppercase tracking-wider border-r border-gray-300">เลขที่</th>
+                                    <th class="px-6 py-3 text-left text-sm font-bold uppercase tracking-wider border-r border-gray-300">ชื่อ-สกุล</th>
+                                    <th class="px-6 py-3 text-left text-sm font-bold uppercase tracking-wider rounded-tr-lg">สถานะ</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${tableRows}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+                statusCards.append(table);
+            } else {
+                statusCards.append('<p class="text-center text-gray-500 py-4">ไม่มีข้อมูลนักเรียนที่มีสถานะนอกจาก "มา"</p>');
+            }
+
+            statusCards.find('tbody tr td:last-child').removeClass('border-r');
+        } catch (error) {
+            console.error('Error in updateOverallStatusSummary:', error);
+            // Avoid Swal here
+        }
+    }
+
+    // Removed openOverallPreviewModal function
+    // Removed downloadOverallPng function
+    // Removed downloadOverallPdf function
+    // Removed printOverall function
+
+</script>

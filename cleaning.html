@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ระบบเช็คเขตพื้นที่</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+  <style>
+    .tab-btn.active { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+    .score-slider { accent-color: #667eea; }
+  </style>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen p-4">
+
+  <div class="max-w-7xl mx-auto">
+    <!-- Header -->
+    <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
+      <h1 class="text-3xl font-bold text-gray-800 text-center mb-2">🧹 ระบบเช็คเขตพื้นที่และรายงานสถิติ</h1>
+      <p class="text-center text-gray-600">Cleaning Area Check & Statistics Dashboard</p>
+    </div>
+
+    <!-- Tabs -->
+    <div class="bg-white rounded-2xl shadow-xl overflow-hidden">
+      <div class="flex border-b">
+        <button class="tab-btn flex-1 py-4 text-center font-semibold transition active" data-tab="input">
+          📝 บันทึกข้อมูล
+        </button>
+        <button class="tab-btn flex-1 py-4 text-center font-semibold transition" data-tab="report">
+          📊 รายงานสถิติ
+        </button>
+      </div>
+
+      <!-- Tab 1: Input -->
+      <div id="input-tab" class="tab-content p-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          <div>
+            <label class="block text-sm font-medium mb-2">วันที่</label>
+            <input type="text" id="input-date" class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500">
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-2">ห้องเรียน</label>
+            <select id="input-classroom" class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500">
+              <option value="">-- เลือกห้องเรียน --</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Student Table -->
+        <div class="mb-6">
+          <h3 class="text-lg font-semibold mb-3">📋 รายชื่อนักเรียน</h3>
+          <div class="overflow-x-auto">
+            <table class="w-full border-collapse border">
+              <thead class="bg-gradient-to-r from-purple-500 to-indigo-600 text-white">
+                <tr>
+                  <th class="border p-3">เลขที่</th>
+                  <th class="border p-3">ชื่อ-สกุล</th>
+                  <th class="border p-3">สถานะ</th>
+                  <th class="border p-3">หน้าที่</th>
+                </tr>
+              </thead>
+              <tbody id="student-table-body" class="bg-white">
+                <tr><td colspan="4" class="text-center p-6 text-gray-500">กรุณาเลือกห้องเรียน</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Score Criteria -->
+        <div class="mb-6">
+          <h3 class="text-lg font-semibold mb-3">⭐ แบบประเมินคะแนน</h3>
+          <div id="criteria-container" class="space-y-4">
+            <!-- จะถูกสร้างแบบ dynamic -->
+          </div>
+        </div>
+
+        <button id="save-btn" class="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white py-3 rounded-lg font-semibold hover:shadow-lg transition">
+          💾 บันทึกข้อมูล
+        </button>
+      </div>
+
+      <!-- Tab 2: Report -->
+      <div id="report-tab" class="tab-content p-6 hidden">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div>
+            <label class="block text-sm font-medium mb-2">วันที่เริ่มต้น</label>
+            <input type="text" id="report-start" class="w-full px-4 py-2 border rounded-lg">
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-2">วันที่สิ้นสุด</label>
+            <input type="text" id="report-end" class="w-full px-4 py-2 border rounded-lg">
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-2">ห้องเรียน (ทุกห้อง)</label>
+            <select id="report-classroom" class="w-full px-4 py-2 border rounded-lg">
+              <option value="">ทุกห้อง</option>
+            </select>
+          </div>
+        </div>
+
+        <button id="load-stats-btn" class="w-full bg-gradient-to-r from-blue-500 to-indigo-600 text-white py-3 rounded-lg font-semibold mb-6 hover:shadow-lg transition">
+          🔍 ดึงข้อมูลสถิติ
+        </button>
+
+        <!-- Summary Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div class="bg-gradient-to-br from-green-400 to-emerald-500 text-white p-6 rounded-xl shadow-lg">
+            <div class="text-sm opacity-90">คะแนนเฉลี่ย</div>
+            <div id="avg-score" class="text-4xl font-bold mt-2">-</div>
+          </div>
+          <div class="bg-gradient-to-br from-blue-400 to-indigo-500 text-white p-6 rounded-xl shadow-lg">
+            <div class="text-sm opacity-90">จำนวนครั้งที่บันทึก</div>
+            <div id="total-records" class="text-4xl font-bold mt-2">-</div>
+          </div>
+          <div class="bg-gradient-to-br from-purple-400 to-pink-500 text-white p-6 rounded-xl shadow-lg">
+            <div class="text-sm opacity-90">ห้องที่มีคะแนนสูงสุด</div>
+            <div id="top-room" class="text-2xl font-bold mt-2">-</div>
+          </div>
+        </div>
+
+        <!-- Top 5 Students -->
+        <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+          <h3 class="text-xl font-bold mb-4 text-gray-800">🏆 Top 5 นักเรียนที่ขยันที่สุด</h3>
+          <table class="w-full">
+            <thead class="bg-gray-100">
+              <tr>
+                <th class="p-3 text-left">อันดับ</th>
+                <th class="p-3 text-left">ชื่อ</th>
+                <th class="p-3 text-center">จำนวนครั้งที่ทำ</th>
+              </tr>
+            </thead>
+            <tbody id="top-students-body">
+              <tr><td colspan="3" class="text-center p-6 text-gray-500">ยังไม่มีข้อมูล</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Score Details -->
+        <div class="bg-white rounded-xl shadow-lg p-6">
+          <h3 class="text-xl font-bold mb-4 text-gray-800">📈 รายละเอียดคะแนนแต่ละวัน</h3>
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th class="p-3 text-left">วันที่</th>
+                  <th class="p-3 text-left">ห้อง</th>
+                  <th class="p-3 text-left">ผู้ตรวจ</th>
+                  <th class="p-3 text-center">คะแนนรวม</th>
+                </tr>
+              </thead>
+              <tbody id="score-details-body">
+                <tr><td colspan="4" class="text-center p-6 text-gray-500">ยังไม่มีข้อมูล</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let CONFIG = { classrooms: [], students: {}, criteria: [] };
+    const TODAY = new Date().toISOString().split('T')[0];
+
+    // Tab Switching
+    $('.tab-btn').click(function() {
+      $('.tab-btn').removeClass('active');
+      $(this).addClass('active');
+      $('.tab-content').addClass('hidden');
+      const tab = $(this).data('tab');
+      $(`#${tab}-tab`).removeClass('hidden');
+    });
+
+    // Initialize Flatpickr
+    flatpickr("#input-date", { dateFormat: "Y-m-d", defaultDate: TODAY });
+    flatpickr("#report-start", { dateFormat: "Y-m-d", defaultDate: new Date(new Date().getFullYear(), new Date().getMonth(), 1) });
+    flatpickr("#report-end", { dateFormat: "Y-m-d", defaultDate: TODAY });
+
+    // Load Config
+    $(document).ready(function() {
+      google.script.run.withSuccessHandler(function(res) {
+        if (res.status === 'success') {
+          CONFIG = res.data;
+          loadClassroomOptions();
+          loadCriteria();
+        } else {
+          Swal.fire('เกิดข้อผิดพลาด', res.message, 'error');
+        }
+      }).getCleaningConfig();
+    });
+
+    function loadClassroomOptions() {
+      const classrooms = CONFIG.classrooms || [];
+      $('#input-classroom, #report-classroom').each(function() {
+        const isReport = $(this).attr('id') === 'report-classroom';
+        $(this).find('option:not(:first)').remove();
+        classrooms.forEach(c => {
+          $(this).append(`<option value="${c.id}">${c.name}</option>`);
+        });
+      });
+    }
+
+    function loadCriteria() {
+      const container = $('#criteria-container');
+      container.empty();
+      CONFIG.criteria.forEach(c => {
+        container.append(`
+          <div class="bg-gray-50 p-4 rounded-lg">
+            <label class="block font-medium mb-2">${c.name} (คะแนนเต็ม: ${c.max_score})</label>
+            <div class="flex items-center gap-4">
+              <input type="range" min="0" max="${c.max_score}" value="0" 
+                     class="score-slider flex-1" data-criterion="${c.name}">
+              <span class="score-value font-bold text-lg w-12 text-center">0</span>
+            </div>
+          </div>
+        `);
+      });
+
+      $('.score-slider').on('input', function() {
+        $(this).siblings('.score-value').text($(this).val());
+      });
+    }
+
+    // Load Students when classroom selected
+    $('#input-classroom').change(function() {
+      const classroomId = $(this).val();
+      if (!classroomId) {
+        $('#student-table-body').html('<tr><td colspan="4" class="text-center p-6 text-gray-500">กรุณาเลือกห้องเรียน</td></tr>');
+        return;
+      }
+
+      const students = CONFIG.students[classroomId] || [];
+      const tbody = $('#student-table-body');
+      tbody.empty();
+
+      if (students.length === 0) {
+        tbody.append('<tr><td colspan="4" class="text-center p-6 text-gray-500">ไม่มีนักเรียนในห้องนี้</td></tr>');
+        return;
+      }
+
+      students.forEach(s => {
+        tbody.append(`
+          <tr class="hover:bg-gray-50">
+            <td class="border p-3 text-center">${s.no}</td>
+            <td class="border p-3">${s.name}</td>
+            <td class="border p-3">
+              <select class="student-status w-full px-2 py-1 border rounded" data-student-id="${s.student_id}">
+                <option value="ทำ">ทำ</option>
+                <option value="ไม่ทำ">ไม่ทำ</option>
+                <option value="หนีเวร">หนีเวร</option>
+              </select>
+            </td>
+            <td class="border p-3">
+              <input type="text" class="student-role w-full px-2 py-1 border rounded" placeholder="เช่น กวาดพื้น">
+            </td>
+          </tr>
+        `);
+      });
+    });
+
+    // Save Data
+    $('#save-btn').click(function() {
+      const date = $('#input-date').val();
+      const classroomId = $('#input-classroom').val();
+      const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
+      const checkerId = teacher.username || 'admin';
+
+      if (!date || !classroomId) {
+        Swal.fire('ข้อผิดพลาด', 'กรุณาเลือกวันที่และห้องเรียน', 'warning');
+        return;
+      }
+
+      // Collect student data
+      const studentData = [];
+      $('.student-status').each(function() {
+        const studentId = $(this).data('student-id');
+        const status = $(this).val();
+        const role = $(this).closest('tr').find('.student-role').val();
+        const student = (CONFIG.students[classroomId] || []).find(s => s.student_id === studentId);
+        studentData.push({
+          student_id: studentId,
+          name: student ? student.name : studentId,
+          status: status,
+          role: role || ''
+        });
+      });
+
+      // Collect scores
+      const scores = {};
+      $('.score-slider').each(function() {
+        const criterion = $(this).data('criterion');
+        scores[criterion] = parseInt($(this).val());
+      });
+
+      const payload = {
+        date: date,
+        classroom_id: classroomId,
+        checker_id: checkerId,
+        student_data: studentData,
+        scores: scores
+      };
+
+      Swal.fire({ title: 'กำลังบันทึก...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+
+      google.script.run.withSuccessHandler(function(res) {
+        Swal.close();
+        if (res.status === 'success') {
+          Swal.fire('สำเร็จ', res.message, 'success');
+          // Reset form
+          $('.score-slider').val(0).trigger('input');
+          $('.student-status').val('ทำ');
+          $('.student-role').val('');
+        } else {
+          Swal.fire('เกิดข้อผิดพลาด', res.message, 'error');
+        }
+      }).saveCleaningData(JSON.stringify(payload));
+    });
+
+    // Load Stats
+    $('#load-stats-btn').click(function() {
+      const startDate = $('#report-start').val();
+      const endDate = $('#report-end').val();
+      const classroomId = $('#report-classroom').val();
+
+      if (!startDate || !endDate) {
+        Swal.fire('ข้อผิดพลาด', 'กรุณาเลือกช่วงวันที่', 'warning');
+        return;
+      }
+
+      Swal.fire({ title: 'กำลังโหลด...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+
+      google.script.run.withSuccessHandler(function(res) {
+        Swal.close();
+        if (res.status === 'success') {
+          renderStats(res.data);
+        } else {
+          Swal.fire('เกิดข้อผิดพลาด', res.message, 'error');
+        }
+      }).getCleaningStats({ startDate, endDate, classroom_id: classroomId });
+    });
+
+    function renderStats(data) {
+      // Summary Cards
+      $('#avg-score').text(data.avgScore + '%');
+      $('#total-records').text(data.scoreDetails.length);
+      
+      // Find top room
+      const roomScores = {};
+      data.scoreDetails.forEach(d => {
+        if (!roomScores[d.classroom_id]) roomScores[d.classroom_id] = [];
+        const [score, max] = d.total_score.split('/').map(Number);
+        if (!isNaN(score) && !isNaN(max) && max > 0) {
+          roomScores[d.classroom_id].push((score / max) * 100);
+        }
+      });
+      let topRoom = '-';
+      let topAvg = 0;
+      for (const room in roomScores) {
+        const avg = roomScores[room].reduce((a,b) => a+b, 0) / roomScores[room].length;
+        if (avg > topAvg) {
+          topAvg = avg;
+          const classroom = CONFIG.classrooms.find(c => c.id === room);
+          topRoom = classroom ? classroom.name : room;
+        }
+      }
+      $('#top-room').text(topRoom);
+
+      // Top Students
+      const tbody = $('#top-students-body');
+      tbody.empty();
+      if (data.topStudents.length === 0) {
+        tbody.append('<tr><td colspan="3" class="text-center p-6 text-gray-500">ยังไม่มีข้อมูล</td></tr>');
+      } else {
+        data.topStudents.forEach((s, i) => {
+          const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
+          tbody.append(`
+            <tr class="hover:bg-gray-50">
+              <td class="p-3">${medal} ${i + 1}</td>
+              <td class="p-3">${s.name}</td>
+              <td class="p-3 text-center font-bold text-green-600">${s.done}</td>
+            </tr>
+          `);
+        });
+      }
+
+      // Score Details
+      const scoreTbody = $('#score-details-body');
+      scoreTbody.empty();
+      if (data.scoreDetails.length === 0) {
+        scoreTbody.append('<tr><td colspan="4" class="text-center p-6 text-gray-500">ยังไม่มีข้อมูล</td></tr>');
+      } else {
+        data.scoreDetails.forEach(d => {
+          const classroom = CONFIG.classrooms.find(c => c.id === d.classroom_id);
+          const classroomName = classroom ? classroom.name : d.classroom_id;
+          scoreTbody.append(`
+            <tr class="hover:bg-gray-50">
+              <td class="p-3">${d.date}</td>
+              <td class="p-3">${classroomName}</td>
+              <td class="p-3">${d.checker}</td>
+              <td class="p-3 text-center font-bold">${d.total_score}</td>
+            </tr>
+          `);
+        });
+      }
+    }
+  </script>
+</body>
+</html>
