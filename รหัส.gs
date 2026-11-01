@@ -20,9 +20,9 @@ function doGet(e) {
         .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
     }
 
-    // หน้าหลัก
-    return HtmlService.createTemplateFromFile('index').evaluate()
-      .setTitle(systemName)
+// หน้าหลัก (แก้ให้โหลด stats2 เป็นหน้าแรก)
+    return HtmlService.createTemplateFromFile('stats2').evaluate()
+      .setTitle(systemName) // หรือเปลี่ยนเป็น systemName + " - วิเคราะห์รายชั้น" ตามที่ต้องการ
       .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   } catch (error) {
