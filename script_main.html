@@ -234,7 +234,6 @@
                 checkLogin();
                 loadClassroomsDropdown("#summary-classroom");
                 updateClassroomSummaryTitle();
-                updateOverallSummaryTitle();
             });
         } catch (error) {
             $.LoadingOverlay("hide");
@@ -334,7 +333,6 @@
             // Initialize period buttons for all tabs
             loadPeriodButtons("#period-buttons");
             loadPeriodButtons("#summary-period-buttons");
-            loadPeriodButtons("#overall-period-buttons");
             
         } catch (error) {
             console.error('Error in initSystem:', error);
@@ -619,6 +617,21 @@
     async function openAttendanceModal(date, period, classroomId, classroomName) {
         try {
             console.log('Opening modal with:', { date, period, classroomId, classroomName });
+            const teacher = JSON.parse(localStorage.getItem("teacher") || "{}");
+            const allowedRooms = (Array.isArray(teacher.classroom_ids)
+                ? teacher.classroom_ids
+                : String(teacher.classroom_ids || '').split(','))
+                .map(s => String(s).trim()).filter(Boolean);
+            const safeClassroomName = $('<div>').text(classroomName).html();
+            if (!allowedRooms.includes(String(classroomId).trim())) {
+                Swal.fire({
+                    icon: 'error',
+                    title: '🔒 ไม่มีสิทธิ์',
+                    html: `คุณไม่ใช่ครูที่ปรึกษาของห้อง <b>${safeClassroomName}</b><br><small class="text-gray-500">เฉพาะครูที่ปรึกษาเท่านั้นที่เช็คชื่อได้</small>`,
+                    confirmButtonText: 'ปิด'
+                });
+                return;
+            }
             if (!date || !period || !classroomId || !classroomName) {
                 Swal.fire({
                     icon: 'error',
@@ -832,7 +845,10 @@
             $.LoadingOverlay("show", { text: "กำลังบันทึกข้อมูล..." });
             const response = await runGoogleScript('saveAttendance', JSON.stringify(newAttendanceEntry));
             if (response.status !== 'success') {
-                throw new Error(response.error?.details || 'ไม่สามารถบันทึกข้อมูลได้');
+                const code = response.error?.code || 'UNKNOWN';
+                const saveError = new Error(response.message || response.error?.details || 'ไม่สามารถบันทึกข้อมูลได้');
+                saveError.code = code;
+                throw saveError;
             }
 
             $.LoadingOverlay("hide");
@@ -848,10 +864,14 @@
         } catch (error) {
             $.LoadingOverlay("hide");
             console.error('Error in saveModalAttendance:', error);
+            let title = 'ข้อผิดพลาด';
+            if (error.code === 'PERMISSION_DENIED') title = '🔒 ไม่มีสิทธิ์';
+            else if (error.code === 'AUTH_FAILED') title = '🔒 บัญชีไม่ถูกต้อง';
+            else if (error.code === 'INVALID_STUDENTS') title = 'ข้อมูลนักเรียนไม่ถูกต้อง';
             Swal.fire({
                 icon: 'error',
-                title: 'ข้อผิดพลาด',
-                text: error.message,
+                title,
+                text: error.message || 'ไม่สามารถบันทึกได้',
                 confirmButtonText: 'ตกลง'
             });
         }
@@ -898,7 +918,6 @@
             
             $("#period-buttons").LoadingOverlay("show");
             $("#summary-period-buttons").LoadingOverlay("show");
-            $("#overall-period-buttons").LoadingOverlay("show");
 
             runGoogleScript('getInitialData')
                 .then(response => {
@@ -924,7 +943,6 @@
                 .finally(() => {
                     $("#period-buttons").LoadingOverlay("hide");
                     $("#summary-period-buttons").LoadingOverlay("hide");
-                    $("#overall-period-buttons").LoadingOverlay("hide");
                 });
 
             $("#login-form").validate({
@@ -955,12 +973,9 @@
                     $("#" + tabId).addClass("active").show();
 
                     if (tabId === "attendance") {
-                        const date = $("#attendance-date").val() || TODAY;
-                        const period = $("#period-buttons .period-btn.active").data("period") || 'morning';
-                        loadClassroomsTable(date, period);
+                        loadClassroomsTable($("#attendance-date").val() || TODAY, $("#period-buttons .period-btn.active").data("period") || 'morning');
                     } else if (tabId === "cleaning") {
-                        const date = $("#cleaning-date").val() || TODAY;
-                        loadCleaningTable(date);
+                        loadCleaningTable($("#cleaning-date").val() || TODAY);
                     } else if (tabId === "cleaning-summary") {
                         loadCleaningSummary();
                     } else if (tabId === "subject-summary") {
@@ -968,15 +983,12 @@
                     } else if (tabId === "attendance-stats") {
                         initAttendanceStats();
                     } else if (tabId === "weekly-summary") {
-                        initWeeklySummary();
-                    } else if (tabId === "risk-assessment") {
-                        initRiskAssessment();
+                        initRiskView("weekly-summary");
+                    } else if (tabId === "monthly-summary") {
+                        initRiskView("monthly-summary");
                     } else if (tabId === "classroom-summary") {
                         loadClassroomSummary();
-                    } else if (tabId === "overall-summary") {
-                        loadOverallSummary();
                     }
-
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                 } catch (error) {
                     console.error('Tab click error:', error);
@@ -989,7 +1001,6 @@
 
             const attendanceDate = checkDateExpiration("attendance-date", TODAY);
             const summaryDate = checkDateExpiration("summary-date", TODAY);
-            const overallDate = checkDateExpiration("overall-date", TODAY);
 
             flatpickr("#attendance-date", {
                 dateFormat: "Y-m-d",
@@ -1019,21 +1030,6 @@
                     updateClassroomSummaryTitle();
                 }
             });
-            flatpickr("#overall-date", {
-                dateFormat: "Y-m-d",
-                locale: "th",
-                defaultDate: overallDate,
-                onReady: function(selectedDates, dateStr, instance) {
-                    if (!dateStr) {
-                        instance.setDate(TODAY);
-                    }
-                },
-                onChange: function(selectedDates, dateStr) {
-                    saveSelectedDate("overall-date", dateStr);
-                    updateOverallSummaryTitle();
-                }
-            });
-
             $("#summary-classroom, #summary-date").on("change", function() {
                 const classroomId = $("#summary-classroom").val();
                 const date = $("#summary-date").val();
@@ -1047,24 +1043,6 @@
             $("#summary-period-buttons").on("click", ".period-btn", function() {
                 updateClassroomSummaryTitle();
                 $("#summary-classroom, #summary-date").trigger("change");
-            });
-
-            $("#overall-date").on("change", function() {
-                const date = $(this).val();
-                const period = $("#overall-period-buttons .period-btn.active").data("period");
-                updateOverallSummaryTitle();
-                if (date && period) {
-                    loadOverallSummaryData(date, period);
-                }
-            });
-
-            $("#overall-period-buttons").on("click", ".period-btn", function() {
-                const date = $("#overall-date").val();
-                const period = $(this).data("period");
-                updateOverallSummaryTitle();
-                if (date && period) {
-                    loadOverallSummaryData(date, period);
-                }
             });
 
             $("#save-modal-attendance").click(function() {

@@ -738,9 +738,26 @@ function saveAttendance(jsonData, spreadsheetMode = DEFAULT_SPREADSHEET_MODE) {
         return createResponse('error', 'Invalid date format', null, { code: 'INVALID_DATE' });
       }
 
-      if (!Array.isArray(students) || students.some(s => !s.student_id || !s.status)) {
+      if (!Array.isArray(students) || students.length === 0 || students.some(s => !s || !s.student_id || !s.status)) {
         return createResponse('error', 'Invalid students data', null, { code: 'INVALID_STUDENTS' });
       }
+
+      // Server-side permission check against the active teacher and assigned classrooms.
+      const teachersSheet = getOrCreateSheet(SHEET_NAMES.TEACHERS, spreadsheetMode);
+      const teachersData = teachersSheet.getDataRange().getValues();
+      const teacherRow = teachersData.slice(1).find(row =>
+        String(row[2] || '').trim() === String(teacher).trim() && String(row[4] || '') === '1'
+      );
+      if (!teacherRow) {
+        Logger.log(`❌ [Attendance] Auth failed: teacher="${teacher}" not found or inactive`);
+        return createResponse('error', 'ไม่พบข้อมูลครูผู้บันทึก หรือบัญชีถูกปิดใช้งาน', null, { code: 'AUTH_FAILED' });
+      }
+      const allowedRooms = String(teacherRow[5] || '').split(',').map(r => r.trim()).filter(Boolean);
+      if (!allowedRooms.includes(room_id)) {
+        Logger.log(`❌ [Attendance] Permission denied: "${teacher}" tried room "${room_id}". Allowed: [${allowedRooms.join(', ') || 'NONE'}]`);
+        return createResponse('error', 'คุณไม่มีสิทธิ์เช็คชื่อห้องนี้ (เฉพาะครูที่ปรึกษาเท่านั้น)', null, { code: 'PERMISSION_DENIED' });
+      }
+      Logger.log(`✅ [Attendance] Permission granted: ${teacher} → ${room_id} (${date}/${period})`);
 
       const sheet = getOrCreateSheet(SHEET_NAMES.ATTENDANCE, spreadsheetMode);
       const data = sheet.getDataRange().getValues();
@@ -1173,6 +1190,24 @@ function saveCleaningData(jsonData, spreadsheetMode = DEFAULT_SPREADSHEET_MODE) 
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
         return createResponse('error', 'Invalid date format', null, { code: 'INVALID_DATE' });
       }
+
+      // Server-side permission check against the active teacher and assigned classrooms.
+      const teachersSheet = getOrCreateSheet(SHEET_NAMES.TEACHERS, spreadsheetMode);
+      const teachersData = teachersSheet.getDataRange().getValues();
+      const teacherRow = teachersData.slice(1).find(row =>
+        String(row[2] || '').trim() === String(checker_id).trim() && String(row[4] || '') === '1'
+      );
+      if (!teacherRow) {
+        Logger.log(`❌ [Cleaning] Permission denied: teacher "${checker_id}" not found or inactive`);
+        return createResponse('error', 'ไม่พบข้อมูลครูผู้บันทึก หรือบัญชีถูกปิดใช้งาน', null, { code: 'AUTH_FAILED' });
+      }
+      const allowedRooms = String(teacherRow[5] || '').split(',').map(r => r.trim()).filter(Boolean);
+      const targetRoom = String(classroom_id).trim();
+      if (!allowedRooms.includes(targetRoom)) {
+        Logger.log(`❌ [Cleaning] Permission denied: "${checker_id}" tried to save room "${targetRoom}". Allowed: [${allowedRooms.join(', ') || 'NONE'}]`);
+        return createResponse('error', 'คุณไม่มีสิทธิ์เช็คเขตพื้นที่ห้องนี้ (เฉพาะครูที่ปรึกษาเท่านั้น)', null, { code: 'PERMISSION_DENIED' });
+      }
+      Logger.log(`✅ [Cleaning] Permission granted: ${checker_id} → ${targetRoom}`);
 
       const updated_at = new Date().toISOString();
 

@@ -353,18 +353,15 @@
     <!-- Navigation Tabs (แถบเมนูด้านบน) -->
     <div class="app-card p-3">
       <div class="nav-tabs-container">
-  <button class="nav-tab active" data-tab="attendance">📝 เช็คชื่อ</button>
+  <button class="nav-tab active" data-tab="attendance">📝 เช็คแถว</button>
   <button class="nav-tab" data-tab="cleaning">🧹 เช็คเขตพื้นที่</button>
-  <button class="nav-tab" data-tab="cleaning-summary">📊 สถิติเขตพื้นที่</button>
-<button class="nav-tab" onclick="openSubjectAttendanceModal()">📚 เช็คเข้าเรียน</button>
-    <!-- ✨ เพิ่มปุ่มสรุปรายวิชาตรงนี้ -->
-  <button class="nav-tab" data-tab="subject-summary">📈 สรุปรายวิชา</button>
-
-  <button class="nav-tab" data-tab="classroom-summary">📊 รายห้อง</button>
-  <button class="nav-tab" data-tab="overall-summary">🏫 ภาพรวม</button>
+  <button class="nav-tab" onclick="openSubjectAttendanceModal()">📚 เช็คเข้าเรียน</button>
   <button class="nav-tab" data-tab="attendance-stats">📊 สถิติเข้าแถว</button>
+  <button class="nav-tab" data-tab="cleaning-summary">📊 สถิติเขตพื้นที่</button>
+  <button class="nav-tab" data-tab="subject-summary">📈 สถิติรายวิชา</button>
+  <button class="nav-tab" data-tab="classroom-summary">📊 รายชั้นเรียน</button>
   <button class="nav-tab" data-tab="weekly-summary">📆 สรุปรายสัปดาห์</button>
-  <button class="nav-tab" data-tab="risk-assessment">🎯 ประเมินความเสี่ยง</button>
+  <button class="nav-tab" data-tab="monthly-summary">📆 สรุปรายเดือน</button>
 </div>
     </div>
 
@@ -676,39 +673,6 @@
       </div>
     </div>
 
-    <div id="overall-summary" class="tab-content hidden">
-      <div class="app-card p-5 mb-5">
-        <div class="flex flex-col md:flex-row gap-4">
-          <div class="w-full md:w-1/2">
-            <label class="block text-gray-500 text-sm font-bold mb-1">📅 เลือกวันที่</label><input type="text" id="overall-date" class="w-full">
-          </div>
-          <div class="w-full md:w-1/2"><label class="block text-gray-500 text-sm font-bold mb-1">⏰ เลือกช่วงเวลา</label>
-            <div id="overall-period-buttons" class="flex gap-2 overflow-x-auto"></div>
-          </div>
-        </div>
-      </div>
-      <div class="app-card p-5">
-        <div id="overall-empty-dashboard" class="text-center py-12 text-gray-400">กรุณาเลือกข้อมูล</div>
-        <h2 id="overall-summary-title" class="text-xl font-bold text-center mb-5"></h2>
-        <div id="overall-table-container" class="hidden mb-6">
-          <div class="table-responsive">
-            <table class="min-w-full">
-              <thead id="overall-summary-thead"></thead>
-              <tbody id="overall-summary-list"></tbody>
-            </table>
-          </div>
-        </div>
-        <div id="overall-chart-container" class="hidden flex flex-col md:flex-row gap-5 mb-6">
-          <div class="w-full md:w-1/2 bg-gray-50 p-4 rounded-2xl h-72"><canvas id="overall-pie-chart"></canvas></div>
-          <div class="w-full md:w-1/2 bg-gray-50 p-4 rounded-2xl h-72"><canvas id="overall-bar-chart"></canvas></div>
-        </div>
-        <div id="overall-status-summary" class="hidden">
-          <h3 class="text-lg font-bold mb-3">สรุปนักเรียนที่ไม่มา</h3>
-          <div id="status-cards"></div>
-        </div>
-      </div>
-    </div>
-
 <!-- ===== Attendance Stats ===== -->
 <div id="attendance-stats" class="tab-content hidden">
   <div class="app-card p-5 mb-5">
@@ -805,118 +769,11 @@
   </div>
 </div>
 
-<!-- ===== Weekly Summary ===== -->
-<div id="weekly-summary" class="tab-content hidden">
-  <div class="app-card p-5 mb-5">
-    <div class="flex flex-col md:flex-row gap-4 items-center">
-      <div class="flex gap-2 items-center">
-        <button id="weekly-prev" class="px-4 py-2 bg-gray-100 rounded-xl font-bold active:scale-95">◀</button>
-        <div id="weekly-range" class="px-4 py-2 bg-blue-50 rounded-xl font-bold text-blue-900 min-w-[220px] text-center"></div>
-        <button id="weekly-next" class="px-4 py-2 bg-gray-100 rounded-xl font-bold active:scale-95">▶</button>
-      </div>
-      <div class="flex gap-2 ml-auto flex-wrap">
-        <button class="weekly-mode-btn px-4 py-2 rounded-xl font-bold bg-blue-700 text-white" data-mode="attendance">📝 เข้าแถว</button>
-        <button class="weekly-mode-btn px-4 py-2 rounded-xl font-bold bg-gray-100 text-gray-600" data-mode="cleaning">🧹 เขตพื้นที่</button>
-        <button class="weekly-mode-btn px-4 py-2 rounded-xl font-bold bg-gray-100 text-gray-600" data-mode="subject">📚 เข้าเรียน</button>
-      </div>
-    </div>
-    <div id="weekly-period-row" class="mt-3 flex gap-2 items-center">
-      <label class="text-sm font-bold text-gray-500">⏰ ช่วงเวลา:</label>
-      <div id="weekly-period-buttons" class="flex gap-2"></div>
-    </div>
-  </div>
+<!-- ===== Weekly Summary (Risk Assessment) ===== -->
+<div id="weekly-summary" class="tab-content hidden" data-risk-prefix="w" data-risk-mode="week"></div>
 
-  <div class="app-card p-5">
-    <div id="weekly-empty" class="text-center py-12 text-gray-400">กำลังโหลด...</div>
-    <div id="weekly-table-container" class="hidden table-responsive">
-      <table class="min-w-full">
-        <thead id="weekly-thead"></thead>
-        <tbody id="weekly-tbody"></tbody>
-        <tfoot id="weekly-tfoot"></tfoot>
-      </table>
-    </div>
-  </div>
-</div>
-
-
-<!-- ===== Student Risk Assessment ===== -->
-<div id="risk-assessment" class="tab-content hidden">
-  <div class="app-card p-5 mb-5">
-    <div class="flex flex-col md:flex-row gap-3 items-end flex-wrap">
-      <div>
-        <label for="risk-view-mode" class="block text-gray-500 text-sm font-bold mb-1">📅 รูปแบบ</label>
-        <select id="risk-view-mode" class="w-full">
-          <option value="week">รายสัปดาห์</option>
-          <option value="month">รายเดือน</option>
-        </select>
-      </div>
-      <div>
-        <label for="risk-date-display" class="block text-gray-500 text-sm font-bold mb-1">📅 ช่วงวันที่</label>
-        <input type="text" id="risk-date-display" class="w-full" readonly style="min-width:220px;">
-      </div>
-      <div>
-        <label for="risk-classroom" class="block text-gray-500 text-sm font-bold mb-1">🏫 ห้อง</label>
-        <select id="risk-classroom" class="w-full"><option value="">ทุกห้อง</option></select>
-      </div>
-      <div class="flex gap-2 ml-auto flex-wrap">
-        <button id="risk-settings-btn" type="button" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-xl font-bold">⚙️ ตั้งค่า</button>
-        <button id="risk-prev" type="button" class="px-3 py-2 bg-gray-100 rounded-xl font-bold" aria-label="ช่วงก่อนหน้า">◀</button>
-        <button id="risk-next" type="button" class="px-3 py-2 bg-gray-100 rounded-xl font-bold" aria-label="ช่วงถัดไป">▶</button>
-        <button id="risk-run" type="button" class="px-6 py-2 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-xl font-bold shadow-lg">🔍 ประเมิน</button>
-        <button id="risk-print-summary" type="button" class="px-4 py-2 bg-slate-700 text-white rounded-xl font-bold active:scale-95">🖨️ พิมพ์รายงาน</button>
-      </div>
-    </div>
-    <div class="mt-2 text-xs text-gray-400">⚙️ น้ำหนักปัจจุบัน: <span id="risk-weights-display">เข้าแถว 40% | เขตพื้นที่ 30% | เข้าเรียน 30%</span></div>
-    <div class="mt-2 text-xs text-gray-500">เกณฑ์กลุ่มรายช่วง: 🔴 คะแนนรวม &lt;60% หรือขาดเรียนติดต่อกัน ≥3 วัน; 🟡 (เมื่อไม่เข้าเกณฑ์แดง) ไม่มีข้อมูล, คะแนนรวม 60–84% หรือ streak 2 วัน; 🟢 คะแนนรวม ≥85% และ streak ไม่เกิน 1 วัน</div>
-  </div>
-
-  <div id="risk-empty" class="app-card p-5 text-center py-12 text-gray-400">เลือกช่วงวันที่แล้วกดประเมิน</div>
-  <div id="risk-content" class="hidden">
-    <div class="app-card p-5 mb-5">
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div class="p-4 rounded-2xl" style="background:#fef2f2"><div class="text-xs font-bold text-rose-800">🔴 กลุ่มใกล้ชิด</div><div id="risk-card-red" class="text-3xl font-extrabold text-rose-700 mt-1">0</div><div class="text-xs text-rose-500">ต้องติดตามทันที</div></div>
-        <div class="p-4 rounded-2xl" style="background:#fefce8"><div class="text-xs font-bold text-amber-800">🟡 กลุ่มห่วงใย / ไม่มีข้อมูล</div><div id="risk-card-yellow" class="text-3xl font-extrabold text-amber-700 mt-1">0</div><div class="text-xs text-amber-500">ควรตรวจสอบเพิ่มเติม</div></div>
-        <div class="p-4 rounded-2xl" style="background:#f0fdf4"><div class="text-xs font-bold text-emerald-800">🟢 กลุ่มไว้ใจ</div><div id="risk-card-green" class="text-3xl font-extrabold text-emerald-700 mt-1">0</div><div class="text-xs text-emerald-500">ทำได้ดี</div></div>
-        <div class="p-4 rounded-2xl" style="background:#eff6ff"><div class="text-xs font-bold text-blue-800">⭐ คะแนนเฉลี่ย</div><div id="risk-card-avg" class="text-3xl font-extrabold text-blue-700 mt-1">—</div><div id="risk-card-total" class="text-xs text-blue-500">จาก 0 คน</div></div>
-      </div>
-    </div>
-
-    <div class="app-card p-5 mb-5">
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
-        <div class="bg-gray-50 p-4 rounded-2xl h-80"><canvas id="risk-pie-chart" aria-label="สัดส่วนกลุ่มความเสี่ยง"></canvas></div>
-        <div class="bg-gray-50 p-4 rounded-2xl h-80"><canvas id="risk-bar-chart" aria-label="แนวโน้มกลุ่มความเสี่ยง"></canvas></div>
-      </div>
-    </div>
-
-    <div class="app-card p-5 mb-5">
-      <div class="flex justify-between items-center mb-3 flex-wrap gap-2">
-        <h3 class="text-lg font-bold text-gray-800">📊 คะแนนรายวัน</h3>
-        <div class="flex gap-2 text-xs flex-wrap">
-          <span class="px-2 py-1 bg-rose-100 text-rose-700 rounded">🔴 &lt; 60%</span>
-          <span class="px-2 py-1 bg-amber-100 text-amber-700 rounded">🟡 60–84%</span>
-          <span class="px-2 py-1 bg-emerald-100 text-emerald-700 rounded">🟢 ≥ 85%</span>
-          <span class="px-2 py-1 bg-gray-100 text-gray-500 rounded">⚪ ไม่มีข้อมูล</span>
-        </div>
-      </div>
-      <div class="table-responsive">
-        <table class="min-w-full"><thead id="risk-grid-thead"></thead><tbody id="risk-grid-tbody"></tbody></table>
-      </div>
-    </div>
-
-    <div id="risk-list-red-container" class="app-card p-5 mb-5">
-      <h3 class="text-lg font-bold text-rose-700 mb-3">🔴 กลุ่มใกล้ชิด (ต้องติดตามทันที)</h3>
-      <div class="table-responsive"><table class="min-w-full"><thead><tr class="bg-rose-700 text-white"><th class="p-3 text-center">ห้อง</th><th class="p-3 text-left">ชื่อ-สกุล</th><th class="p-3 text-center">เข้าแถว</th><th class="p-3 text-center">เขตพื้นที่</th><th class="p-3 text-center">เข้าเรียน</th><th class="p-3 text-center">Composite</th><th class="p-3 text-center">Streak</th><th class="p-3 text-center">ดำเนินการ</th></tr></thead><tbody id="risk-list-red"></tbody></table></div>
-    </div>
-    <div id="risk-list-yellow-container" class="app-card p-5 mb-5">
-      <h3 class="text-lg font-bold text-amber-700 mb-3">🟡 กลุ่มห่วงใย / ไม่มีข้อมูล</h3>
-      <div class="table-responsive"><table class="min-w-full"><thead><tr class="bg-amber-700 text-white"><th class="p-3 text-center">ห้อง</th><th class="p-3 text-left">ชื่อ-สกุล</th><th class="p-3 text-center">เข้าแถว</th><th class="p-3 text-center">เขตพื้นที่</th><th class="p-3 text-center">เข้าเรียน</th><th class="p-3 text-center">Composite</th><th class="p-3 text-center">Streak</th><th class="p-3 text-center">ดำเนินการ</th></tr></thead><tbody id="risk-list-yellow"></tbody></table></div>
-    </div>
-    <div id="risk-list-green-container" class="app-card p-5">
-      <h3 class="text-lg font-bold text-emerald-700 mb-3">🟢 กลุ่มไว้ใจ (ทำได้ดี)</h3>
-      <div class="table-responsive"><table class="min-w-full"><thead><tr class="bg-emerald-700 text-white"><th class="p-3 text-center">ห้อง</th><th class="p-3 text-left">ชื่อ-สกุล</th><th class="p-3 text-center">เข้าแถว</th><th class="p-3 text-center">เขตพื้นที่</th><th class="p-3 text-center">เข้าเรียน</th><th class="p-3 text-center">Composite</th><th class="p-3 text-center">Streak</th><th class="p-3 text-center">ดำเนินการ</th></tr></thead><tbody id="risk-list-green"></tbody></table></div>
-    </div>
-  </div>
-</div>
+<!-- ===== Monthly Summary (Risk Assessment) ===== -->
+<div id="monthly-summary" class="tab-content hidden" data-risk-prefix="m" data-risk-mode="month"></div>
 
 <!-- Print Config Modal: prepares documents for printing only; it does not contact guardians. -->
 <div id="print-config-modal" class="fixed inset-0 z-[60] items-center justify-center bg-black/50 backdrop-blur-sm p-4" style="display:none;">
@@ -967,18 +824,6 @@
       <button type="button" onclick="$('#print-config-modal').hide()" class="flex-1 py-3 bg-gray-100 rounded-2xl font-bold">ยกเลิก</button>
       <button id="print-config-confirm" type="button" class="flex-1 py-3 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-2xl font-bold">🖨️ พิมพ์</button>
     </div>
-  </div>
-</div>
-
-<div id="risk-settings-modal" class="fixed inset-0 z-50 items-center justify-center bg-black/50 backdrop-blur-sm p-4" style="display:none">
-  <div class="app-card w-full max-w-md bg-white rounded-3xl overflow-hidden">
-    <div class="flex justify-between items-center p-5 bg-gradient-to-r from-slate-800 to-slate-900 text-white"><h2 class="text-lg font-bold">⚙️ ตั้งค่าน้ำหนักการประเมิน</h2><button type="button" data-risk-close="risk-settings-modal" class="text-2xl">×</button></div>
-    <div class="p-5"><p class="text-sm text-gray-500 mb-4">ระบบจะปรับสัดส่วนตามกิจกรรมที่มีข้อมูล</p><div class="space-y-4">
-      <div><label for="risk-w-att" class="block text-sm font-bold mb-1">📝 เข้าแถว</label><input type="number" id="risk-w-att" class="w-full" min="0" max="100" value="40"></div>
-      <div><label for="risk-w-cln" class="block text-sm font-bold mb-1">🧹 เขตพื้นที่</label><input type="number" id="risk-w-cln" class="w-full" min="0" max="100" value="30"></div>
-      <div><label for="risk-w-subj" class="block text-sm font-bold mb-1">📚 เข้าเรียน</label><input type="number" id="risk-w-subj" class="w-full" min="0" max="100" value="30"></div>
-    </div></div>
-    <div class="p-5 flex gap-3"><button type="button" data-risk-close="risk-settings-modal" class="flex-1 py-3 bg-gray-100 rounded-2xl font-bold">ยกเลิก</button><button id="risk-settings-save" type="button" class="flex-1 py-3 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-2xl font-bold">บันทึก</button></div>
   </div>
 </div>
 

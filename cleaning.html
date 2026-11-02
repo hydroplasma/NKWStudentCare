@@ -173,9 +173,30 @@
       $("#input-date").val(PREFILL.date);
 
       if (PREFILL.room) {
-        // lock classroom selector
+        // Client-side permission check; the server independently enforces this on save.
+        let teacherData = localStorage.getItem('teacher');
+        if (!teacherData && window.parent) teacherData = window.parent.localStorage.getItem('teacher');
+        const teacher = JSON.parse(teacherData || '{}');
+        const allowed = (Array.isArray(teacher.classroom_ids)
+          ? teacher.classroom_ids
+          : String(teacher.classroom_ids || '').split(','))
+          .map(s => String(s).trim()).filter(Boolean);
+
+        if (!allowed.includes(String(PREFILL.room).trim())) {
+          Swal.fire({
+            icon: 'error',
+            title: '🔒 ไม่มีสิทธิ์',
+            html: 'คุณไม่ใช่ครูที่ปรึกษาของห้องนี้<br><small class="text-gray-500">เฉพาะครูที่ปรึกษาเท่านั้นที่เช็คเขตพื้นที่ได้</small>',
+            allowOutsideClick: false,
+            confirmButtonText: 'ปิด'
+          }).then(() => {
+            if (window.parent && window.parent.$) window.parent.$('#cleaning-modal').hide();
+          });
+          $("#save-btn").prop('disabled', true).text('🔒 ไม่มีสิทธิ์บันทึก').css('opacity', 0.5);
+          return;
+        }
+
         $("#input-classroom").val(PREFILL.room).prop('disabled', true).trigger('change');
-        // Load existing data
         setTimeout(() => loadExistingData(PREFILL.date, PREFILL.room), 300);
       }
     }
@@ -311,19 +332,26 @@
               timer: 1800,
               showConfirmButton: false
             }).then(() => {
-              // ปิด modal หลังบันทึก (ถ้าอยากให้เปิดค้างไว้ comment บรรทัดนี้)
               if (window.parent && window.parent.$) {
                 window.parent.$('#cleaning-modal').hide();
-                // refresh parent table
-                if (window.parent.loadCleaningTable) {
-                  window.parent.loadCleaningTable(date);
-                }
+                if (window.parent.loadCleaningTable) window.parent.loadCleaningTable(date);
               }
             });
           } else {
-            Swal.fire('ผิดพลาด', res.message, 'error');
+            const code = res.error && res.error.code;
+            const isPerm = code === 'PERMISSION_DENIED';
+            const isAuth = code === 'AUTH_FAILED';
+            Swal.fire({
+              icon: 'error',
+              title: isPerm ? '🔒 ไม่มีสิทธิ์' : isAuth ? '🔒 บัญชีไม่ถูกต้อง' : 'ผิดพลาด',
+              text: res.message || 'ไม่สามารถบันทึกได้'
+            });
           }
+        }).withFailureHandler(function (error) {
+          Swal.close();
+          Swal.fire('ผิดพลาด', (error && error.message) || 'ไม่สามารถบันทึกได้', 'error');
         }).saveCleaningData(JSON.stringify(payload));
+
       }
     });
   </script>

@@ -421,424 +421,6 @@
     // Removed downloadClassroomPdf function
     // Removed printClassroom function
 
-    function loadOverallSummary() {
-        try {
-            console.log('Loading overall summary');
-            const date = $("#overall-date").val() || TODAY;
-            let period = $("#overall-period-buttons .period-btn.active").data("period");
-            if (!period) {
-                period = "morning";
-                $("#overall-period-buttons .period-btn[data-period='morning']").addClass("active bg-indigo-600 text-white").removeClass("text-gray-700 bg-white");
-            }
-            $("#overall-chart-container").hide();
-            $("#overall-table-container").hide();
-            $("#overall-status-summary").hide();
-            // Removed line related to overall-preview-btn
-            $("#overall-empty-dashboard").show();
-             updateOverallSummaryTitle(); // Call title update here
-            if (date && period) {
-                loadOverallSummaryData(date, period);
-            } else {
-                console.warn('Missing date or period for overall summary');
-            }
-        } catch (error) {
-            console.error('Error in loadOverallSummary:', error);
-            Swal.fire({
-                icon: 'error',
-                title: 'ข้อผิดพลาด',
-                text: 'เกิดข้อผิดพลาดในการโหลดสรุปภาพรวม: ' + error.message,
-                confirmButtonText: 'ตกลง'
-            });
-        }
-    }
-
-    function updateOverallSummaryTitle() {
-        try {
-            const date = $("#overall-date").val() || TODAY;
-            const period = $("#overall-period-buttons .period-btn.active").data("period") || 'morning';
-            const periodName = period ? PERIODS.find(p => p.id === period)?.name || period : 'เช้า';
-            
-            const schoolName = CONFIG.school_config.schoolName || 'โรงเรียน';
-            $("#overall-summary-title").html(`
-                สรุปเช็คชื่อนักเรียนทั้งโรงเรียน<br>
-                ${schoolName}<br>
-                วันที่ ${formatDateThai(date)} ช่วง${periodName}
-            `);
-        } catch (error) {
-            console.error('Error in updateOverallSummaryTitle:', error);
-            // Avoid Swal here
-        }
-    }
-
-    async function loadOverallSummaryData(date, period) {
-        try {
-            $.LoadingOverlay("show");
-            console.log('Loading overall summary data for date:', date, 'and period:', period);
-
-            const classroomResponse = await runGoogleScript('getClassrooms', []);
-            if (classroomResponse.status !== 'success') {
-                throw new Error(classroomResponse.error.details || 'Failed to load classrooms');
-            }
-            const allClassrooms = classroomResponse.data;
-
-            const attendanceResponse = await runGoogleScript('getAttendance', date, period, null);
-            if (attendanceResponse.status !== 'success') {
-                throw new Error(attendanceResponse.error.details || 'Failed to load attendance data');
-            }
-            const attendanceLog = attendanceResponse.data;
-            const filteredData = attendanceLog.filter(entry => 
-                entry.date === date && 
-                entry.period === period
-            ).sort((a, b) => new Date(b.updated_at || b.date) - new Date(a.updated_at || b.date));
-            
-            if (filteredData.length === 0 && (!allClassrooms || allClassrooms.length === 0)) {
-                $.LoadingOverlay("hide");
-                Swal.fire({
-                    icon: 'info',
-                    title: 'ไม่พบข้อมูล',
-                    text: 'ยังไม่มีข้อมูลการเช็คชื่อสำหรับวันที่และช่วงเวลาที่เลือก และไม่มีห้องเรียนในระบบ',
-                    confirmButtonText: 'ตกลง'
-                });
-                $("#overall-chart-container").hide();
-                $("#overall-table-container").hide();
-                $("#overall-status-summary").hide();
-                // Removed line related to overall-preview-btn
-                $("#overall-empty-dashboard").show();
-                return;
-            }
-
-            const studentResponse = await runGoogleScript('getStudents', allClassrooms.map(c => c.id));
-            if (studentResponse.status !== 'success') {
-                throw new Error(studentResponse.error.details || 'Failed to load students');
-            }
-            const studentsByClassroom = studentResponse.data;
-
-            const statusCounts = {};
-            STATUS_LIST.forEach(status => {
-                statusCounts[status.label] = 0;
-            });
-            
-            const tableData = [];
-            const statusStudents = {};
-            STATUS_LIST.forEach(status => {
-                if (status.label !== "มา") {
-                    statusStudents[status.label] = [];
-                }
-            });
-            const latestEntries = {};
-            filteredData.forEach(entry => {
-                if (!latestEntries[entry.room_id] || new Date(entry.updated_at || entry.date) > new Date(latestEntries[entry.room_id].updated_at || entry.date)) {
-                    latestEntries[entry.room_id] = entry;
-                }
-            });
-
-            let totalStudents = 0;
-            allClassrooms.forEach(classroom => {
-                const dayCounts = {};
-                STATUS_LIST.forEach(status => {
-                    dayCounts[status.label] = 0;
-                });
-
-                const entry = latestEntries[classroom.id];
-                if (entry) {
-                    entry.students.forEach(student => {
-                        if (statusCounts[student.status] !== undefined) {
-                            statusCounts[student.status]++;
-                            dayCounts[student.status]++;
-                        } else {
-                            console.warn('Unknown status found:', student.status);
-                        }
-                        const studentData = studentsByClassroom[classroom.id]?.find(s => String(s.student_id) === String(student.student_id));
-                        if (studentData && student.status !== "มา") {
-                            if (statusStudents[student.status]) {
-                                statusStudents[student.status].push({
-                                    classroom: classroom.name,
-                                    student_id: student.student_id,
-                                    no: studentData.no,
-                                    name: studentData.name,
-                                    status: student.status,
-                                    reason: student.reason || ''
-                                });
-                            }
-                        }
-                    });
-                }
-
-                const studentCount = studentsByClassroom[classroom.id]?.length || 0;
-                totalStudents += studentCount;
-                const periodName = PERIODS.find(p => p.id === period)?.name || period;
-                tableData.push({
-                    date: date,
-                    classroom: classroom.name,
-                    period: periodName,
-                    counts: dayCounts,
-                    studentCount: studentCount,
-                    checked: !!entry,
-                    classroomId: classroom.id
-                });
-            });
-
-            updateOverallTable(tableData, statusCounts, totalStudents);
-            updateOverallCharts(statusCounts);
-            updateOverallStatusSummary(statusStudents);
-            
-            $("#overall-table-container").show();
-            $("#overall-chart-container").show();
-            $("#overall-status-summary").show();
-            // Removed lines related to overall-preview-btn
-            $("#overall-empty-dashboard").hide();
-
-            // Removed event listener for overall-preview-btn
-            
-            $.LoadingOverlay("hide");
-        } catch (error) {
-            $.LoadingOverlay("hide");
-            console.error('Error in loadOverallSummaryData:', error);
-            Swal.fire({
-                icon: 'error',
-                title: 'ข้อผิดพลาด',
-                text: 'เกิดข้อผิดพลาดในการโหลดข้อมูลสรุปทั้งโรงเรียน: ' + error.message,
-                confirmButtonText: 'ตกลง'
-            });
-        }
-    }
-
-    function updateOverallCharts(statusCounts) {
-        try {
-            const pieCanvas = document.getElementById('overall-pie-chart');
-            if (!pieCanvas) {
-                // console.warn('Canvas for overall pie chart not found.');
-                return;
-            }
-            const pieCtx = pieCanvas.getContext('2d');
-            if (window.overallPieChart) {
-                window.overallPieChart.destroy();
-            }
-            window.overallPieChart = new Chart(pieCtx, {
-                type: 'pie',
-                data: {
-                    labels: STATUS_LIST.map(status => status.label),
-                    datasets: [{
-                        data: STATUS_LIST.map(status => statusCounts[status.label] || 0),
-                        backgroundColor: STATUS_LIST.map(status => status.hexColor)
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { position: 'right' },
-                        title: {
-                            display: true,
-                            text: 'สัดส่วนสถานะการเข้าเรียนทั้งโรงเรียน'
-                        }
-                    },
-                    layout: {
-                        padding: 10
-                    }
-                }
-            });
-
-            const barCanvas = document.getElementById('overall-bar-chart');
-            if (!barCanvas) {
-                // console.warn('Canvas for overall bar chart not found.');
-                return;
-            }
-            const barCtx = barCanvas.getContext('2d');
-            if (window.overallBarChart) {
-                window.overallBarChart.destroy();
-            }
-            window.overallBarChart = new Chart(barCtx, {
-                type: 'bar',
-                data: {
-                    labels: STATUS_LIST.map(status => status.label),
-                    datasets: [{
-                        label: 'จำนวนนักเรียน',
-                        data: STATUS_LIST.map(status => statusCounts[status.label] || 0),
-                        backgroundColor: STATUS_LIST.map(status => status.hexColor)
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false },
-                        title: {
-                            display: true,
-                            text: 'จำนวนนักเรียนตามสถานะการเข้าเรียนทั้งโรงเรียน'
-                        }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            ticks: { precision: 0 }
-                        }
-                    },
-                    layout: {
-                        padding: {
-                            top: 10,
-                            bottom: 10
-                        }
-                    }
-                }
-            });
-
-            const pieChartCard = $('#overall-pie-chart').closest('.bg-white.rounded-lg.shadow.p-4');
-             if (pieChartCard.length) {
-                $('#overall-pie-chart').css({ 'width': '100%', 'height': '300px' });
-            }
-
-            const barChartCard = $('#overall-bar-chart').closest('.bg-white.rounded-lg.shadow.p-4');
-            if (barChartCard.length) {
-                $('#overall-bar-chart').css({ 'width': '100%', 'height': '300px' });
-            }
-
-        } catch (error) {
-            console.error('Error in updateOverallCharts:', error);
-            // Avoid Swal here
-        }
-    }
-
-    function updateOverallTable(tableData, statusCounts, totalStudents) {
-        try {
-            const tableHead = $("#overall-summary-thead");
-            const tableBody = $("#overall-summary-list");
-            tableHead.empty();
-            tableBody.empty();
-            
-            const headers = `
-                <tr class="bg-gradient-to-r from-indigo-500 to-purple-500 text-white border-b border-gray-300">
-                    <th class="px-6 py-3 text-center text-xs font-medium uppercase tracking-wider rounded-tl-lg border-r border-gray-300">ห้องเรียน</th>
-                    <th class="px-6 py-3 text-center text-xs font-medium uppercase tracking-wider border-r border-gray-300">นักเรียน</th>
-                    ${STATUS_LIST.map(status => `
-                        <th class="px-1 py-1 text-center text-xs font-medium uppercase tracking-wider border-r border-gray-300">${status.label}</th>
-                    `).join('')}
-                    <th class="px-6 py-3 text-center text-xs font-medium uppercase tracking-wider rounded-tr-lg border-r border-gray-300">สถานะ</th>
-                </tr>
-            `;
-            tableHead.append(headers);
-            
-            tableData.sort((a, b) => a.classroom.localeCompare(b.classroom));
-            tableData.forEach((entry, index) => {
-                const isEven = index % 2 === 0;
-                const rowColor = isEven ? 'bg-gray-50' : 'bg-white';
-                const statusText = entry.checked
-                    ? `<span class="text-green-600">เช็คชื่อแล้ว</span>`
-                    : `<span class="text-red-600">ยังไม่ได้เช็คชื่อ</span>`;
-                const row = `
-                    <tr class="${rowColor} hover:bg-gray-100 transition-colors border-b border-gray-200">
-                        <td class="px-6 py-4 text-center whitespace-nowrap border-r border-gray-200">${entry.classroom}</td>
-                        <td class="px-6 py-4 text-center whitespace-nowrap border-r border-gray-200">${entry.studentCount}</td>
-                        ${STATUS_LIST.map(status => `
-                            <td class="px-1 py-1 text-center whitespace-nowrap border-r border-gray-200" style="color: ${darkenColor(status.hexColor, 20)};">${entry.counts[status.label] || 0}</td>
-                        `).join('')}
-                        <td class="px-6 py-4 text-center whitespace-nowrap border-r border-gray-200">${statusText}</td>
-                    </tr>
-                `;
-                tableBody.append(row);
-            });
-            
-            const summaryRow = `
-                <tr class="font-bold bg-indigo-100 border-t border-b border-gray-200">
-                    <td class="px-6 py-4 text-center whitespace-nowrap border-r border-gray-200">รวม</td>
-                    <td class="px-6 py-4 text-center whitespace-nowrap border-r border-gray-200">${totalStudents}</td>
-                    ${STATUS_LIST.map(status => `
-                        <td class="px-1 py-1 text-center whitespace-nowrap border-r border-gray-200" style="color: ${darkenColor(status.hexColor, 20)};">${statusCounts[status.label] || 0}</td>
-                    `).join('')}
-                    <td class="px-6 py-4 whitespace-nowrap border-r border-gray-200"></td>
-                </tr>
-                <tr class="font-bold bg-indigo-50">
-                    <td colspan="2" class="px-6 py-4 text-center whitespace-nowrap rounded-bl-lg border-r border-gray-200">%</td>
-                    ${STATUS_LIST.map(status => `
-                        <td class="px-1 py-1 text-center whitespace-nowrap border-r border-gray-200" style="color: ${darkenColor(status.hexColor, 20)};">${totalStudents > 0 ? ((statusCounts[status.label] / totalStudents) * 100).toFixed(2) : 0}%</td>
-                    `).join('')}
-                    <td class="px-6 py-4 whitespace-nowrap rounded-br-lg border-r border-gray-200"></td>
-                </tr>
-            `;
-            tableBody.append(summaryRow);
-
-            tableBody.find('tr td:last-child').removeClass('border-r');
-            tableBody.closest('table').removeClass('border');
-        } catch (error) {
-            console.error('Error in updateOverallTable:', error);
-            // Avoid Swal here
-        }
-    }
-
-    function updateOverallStatusSummary(statusStudents) {
-        try {
-            const statusCards = $("#status-cards");
-            statusCards.empty();
-
-            $("#overall-status-summary h3").text("สรุปสถานะนักเรียนที่มีสถานะนอกจากมาปกติ");
-
-            let tableRows = '';
-            STATUS_LIST.forEach(status => {
-                if (status.label !== "มา") {
-                    const students = statusStudents[status.label] || [];
-                    const count = students.length;
-                    if (count > 0) {
-                        const statusColor = status.hexColor || '#000000';
-                        const lighterColor = lightenColor(statusColor, 40);
-                        const darkerColor = darkenColor(statusColor, 20);
-                        tableRows += `
-                            <tr class="bg-gray-100">
-                                <td colspan="4" class="px-6 py-3 font-bold text-left" style="background-color: ${lighterColor}; color: ${darkerColor};">
-                                    ${status.label} (${count})
-                                </td>
-                            </tr>
-                        `;
-                        students.forEach(student => {
-                            tableRows += `
-                                <tr class="border-b border-gray-200">
-                                    <td class="px-6 py-4 whitespace-nowrap border-r border-gray-200">${student.classroom}</td>
-                                    <td class="px-6 py-4 whitespace-nowrap border-r border-gray-200">${student.no}</td>
-                                    <td class="px-6 py-4 whitespace-nowrap border-r border-gray-200">${student.name}</td>
-                                    <td class="px-6 py-4 whitespace-nowrap">${student.status}${student.reason ? ` (${student.reason})` : ''}</td>
-                                </tr>
-                            `;
-                        });
-                    }
-                }
-            });
-
-            if (tableRows) {
-                const table = `
-                    <div class="table-responsive w-full">
-                        <table class="min-w-full w-full bg-white border-0">
-                            <thead>
-                                <tr class="bg-gradient-to-r from-indigo-300 to-purple-300 text-white border-b border-gray-300">
-                                    <th class="px-6 py-3 text-left text-sm font-bold uppercase tracking-wider rounded-tl-lg border-r border-gray-300">ห้องเรียน</th>
-                                    <th class="px-6 py-3 text-left text-sm font-bold uppercase tracking-wider border-r border-gray-300">เลขที่</th>
-                                    <th class="px-6 py-3 text-left text-sm font-bold uppercase tracking-wider border-r border-gray-300">ชื่อ-สกุล</th>
-                                    <th class="px-6 py-3 text-left text-sm font-bold uppercase tracking-wider rounded-tr-lg">สถานะ</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${tableRows}
-                            </tbody>
-                        </table>
-                    </div>
-                `;
-                statusCards.append(table);
-            } else {
-                statusCards.append('<p class="text-center text-gray-500 py-4">ไม่มีข้อมูลนักเรียนที่มีสถานะนอกจาก "มา"</p>');
-            }
-
-            statusCards.find('tbody tr td:last-child').removeClass('border-r');
-        } catch (error) {
-            console.error('Error in updateOverallStatusSummary:', error);
-            // Avoid Swal here
-        }
-    }
-
-    // Removed openOverallPreviewModal function
-    // Removed downloadOverallPng function
-    // Removed downloadOverallPdf function
-    // Removed printOverall function
-
-
-
 // CLEANING SUMMARY
 // ========================================
 
@@ -1571,668 +1153,607 @@ async function viewAttendanceStudentDetail(studentId, studentName) {
 }
 
 // ========================================
-// PHASE 3: Weekly Summary
+// RISK VIEW — Weekly + Monthly (shared)
 // ========================================
 
-let weeklyState = {
-  currentMode: 'attendance',
-  currentStartDate: null,
-  currentEndDate: null,
-  currentPeriod: 'morning'
-};
-
-function initWeeklySummary() {
-  setWeek(TODAY);
-
-  $(".weekly-mode-btn").off("click").on("click", function() {
-    $(".weekly-mode-btn").removeClass("bg-blue-700 text-white").addClass("bg-gray-100 text-gray-600");
-    $(this).removeClass("bg-gray-100 text-gray-600").addClass("bg-blue-700 text-white");
-    weeklyState.currentMode = $(this).data('mode');
-    $("#weekly-period-row").toggle(weeklyState.currentMode === 'attendance');
-    loadWeeklyReport();
-  });
-
-  loadPeriodButtons("#weekly-period-buttons");
-  $("#weekly-period-buttons").off("click", ".period-btn").on("click", ".period-btn", function() {
-    $("#weekly-period-buttons .period-btn").removeClass("active text-white").addClass("text-gray-700 bg-white");
-    $(this).addClass("active text-white").removeClass("text-gray-700 bg-white");
-    weeklyState.currentPeriod = $(this).data('period');
-    loadWeeklyReport();
-  });
-
-  $("#weekly-prev").off("click").on("click", () => shiftWeek(-7));
-  $("#weekly-next").off("click").on("click", () => shiftWeek(7));
-
-  loadWeeklyReport();
-}
-
-function setWeek(baseDateStr) {
-  const d = new Date(baseDateStr);
-  const dayOfWeek = d.getDay();
-  const firstDay = new Date(d);
-  firstDay.setDate(d.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-  const lastDay = new Date(firstDay);
-  lastDay.setDate(firstDay.getDate() + 4);
-
-  const fmt = (dt) => {
-    const p = [dt.getFullYear(), String(dt.getMonth() + 1).padStart(2, '0'), String(dt.getDate()).padStart(2, '0')];
-    return p.join('-');
-  };
-
-  weeklyState.currentStartDate = fmt(firstDay);
-  weeklyState.currentEndDate = fmt(lastDay);
-  updateWeeklyRangeLabel();
-}
-
-function shiftWeek(days) {
-  const d = new Date(weeklyState.currentStartDate);
-  d.setDate(d.getDate() + days);
-  const fmt = (dt) => {
-    const p = [dt.getFullYear(), String(dt.getMonth() + 1).padStart(2, '0'), String(dt.getDate()).padStart(2, '0')];
-    return p.join('-');
-  };
-  setWeek(fmt(d));
-  loadWeeklyReport();
-}
-
-function updateWeeklyRangeLabel() {
-  const fmt = (ds) => {
-    const p = ds.split('-');
-    return `${parseInt(p[2])}/${parseInt(p[1])}`;
-  };
-  const year = parseInt(weeklyState.currentStartDate.split('-')[0]) + 543;
-  $("#weekly-range").text(`${fmt(weeklyState.currentStartDate)} - ${fmt(weeklyState.currentEndDate)} / ${year}`);
-}
-
-async function loadWeeklyReport() {
-  $("#weekly-empty").show().text("กำลังโหลด...");
-  $("#weekly-table-container").addClass("hidden");
-
-  const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
-  const teacherEmail = teacher.username || teacher.email || '';
-
-  const options = {
-    period: weeklyState.currentMode === 'attendance' ? weeklyState.currentPeriod : '',
-    teacherEmail: teacherEmail
-  };
-
-  try {
-    const res = await runGoogleScript('getWeeklyCheckReport',
-      weeklyState.currentStartDate, weeklyState.currentEndDate,
-      weeklyState.currentMode, options);
-    if (res.status !== 'success') throw new Error(res.message);
-    renderWeeklyTable(res.data, weeklyState.currentMode);
-    $("#weekly-empty").hide();
-    $("#weekly-table-container").removeClass("hidden");
-  } catch (err) {
-    $("#weekly-empty").text("ผิดพลาด: " + err.message);
-  }
-}
-
-function renderWeeklyTable(data, mode) {
-  const { weekDates, rows } = data;
-  const dayNames = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
-
-  // Header
-  let thead = '<tr class="bg-blue-700 text-white">';
-  thead += '<th class="p-3 text-left">รายการ</th>';
-  weekDates.forEach(d => {
-    const dayOfWeek = new Date(d + 'T00:00:00Z').getUTCDay();
-    const [_, m, dd] = d.split('-');
-    thead += `<th class="p-3 text-center">${dayNames[dayOfWeek]}<br><span class="text-xs opacity-75">${parseInt(dd)}/${parseInt(m)}</span></th>`;
-  });
-  thead += '<th class="p-3 text-center">รวม</th><th class="p-3 text-center">%</th>';
-  thead += '</tr>';
-  $("#weekly-thead").html(thead);
-
-  // Body
-  const tbody = $("#weekly-tbody").empty();
-
-  rows.forEach(r => {
-    const scheduledDates = weekDates.filter(d => d in r.dates);
-    const checkedCount = scheduledDates.filter(d => r.dates[d] === true).length;
-    const pct = scheduledDates.length > 0 ? ((checkedCount / scheduledDates.length) * 100).toFixed(0) : 0;
-    const pctColor = pct >= 80 ? 'text-emerald-600' : pct >= 50 ? 'text-amber-600' : 'text-rose-600';
-
-    let html = `<tr class="border-b border-gray-100 hover:bg-blue-50">`;
-    html += `<td class="p-3 font-medium text-gray-800">${escapeSummaryHtml(r.name)}${r.sublabel ? ` <span class="text-xs text-gray-500">(${escapeSummaryHtml(r.sublabel)})</span>` : ''}</td>`;
-
-    weekDates.forEach(d => {
-      const isScheduled = d in r.dates;
-      const isChecked = r.dates[d] === true;
-      if (!isScheduled) {
-        html += '<td class="p-3 text-center text-gray-300">—</td>';
-      } else {
-        const icon = isChecked ? '<span class="text-emerald-600 font-bold">✓</span>' : '<span class="text-red-500 font-bold">⚡</span>';
-        const cursor = r.clickable ? 'cursor-pointer hover:bg-blue-100' : '';
-        const clickData = r.clickable
-          ? `data-date="${escapeSummaryHtml(d)}" data-row-id="${escapeSummaryHtml(r.id)}" data-mode="${escapeSummaryHtml(mode)}" data-meta="${escapeSummaryHtml(JSON.stringify(r.meta || {}))}"`
-          : '';
-        html += `<td class="p-3 text-center ${cursor} ${r.clickable ? 'weekly-cell' : ''}" ${clickData}>${icon}</td>`;
-      }
-    });
-
-    html += `<td class="p-3 text-center font-bold">${checkedCount}/${scheduledDates.length}</td>`;
-    html += `<td class="p-3 text-center font-bold ${pctColor}">${pct}%</td>`;
-    html += '</tr>';
-    tbody.append(html);
-  });
-
-  tbody.off('click', '.weekly-cell').on('click', '.weekly-cell', function() {
-    const cell = $(this);
-    handleWeeklyCellClick(cell.attr('data-date'), cell.attr('data-row-id'), cell.attr('data-mode'), cell.attr('data-meta') || '{}');
-  });
-
-  // Footer
-  let tfoot = '<tr class="bg-blue-100 font-bold">';
-  tfoot += '<td class="p-3">รวม</td>';
-  weekDates.forEach(d => {
-    let checked = 0, total = 0;
-    rows.forEach(r => {
-      if (d in r.dates) {
-        total++;
-        if (r.dates[d]) checked++;
-      }
-    });
-    tfoot += `<td class="p-3 text-center">${checked}/${total}</td>`;
-  });
-  tfoot += '<td class="p-3 text-center">—</td><td class="p-3 text-center">—</td></tr>';
-  $("#weekly-tfoot").html(tfoot);
-}
-
-function handleWeeklyCellClick(date, rowId, mode, metaJson) {
-  const meta = JSON.parse(metaJson);
-
-  if (mode === 'attendance') {
-    const roomName = (ALL_CLASSROOMS.find(c => c.id === rowId) || {}).name || rowId;
-    openAttendanceModal(date, weeklyState.currentPeriod, rowId, roomName);
-  } else if (mode === 'cleaning') {
-    const roomName = (ALL_CLASSROOMS.find(c => c.id === rowId) || {}).name || rowId;
-    openCleaningModal(date, rowId, roomName);
-  } else if (mode === 'subject') {
-    // เปิด subject modal พร้อม preselect
-    openSubjectAttendanceModal({ date: date, subjectCode: meta.code });
-  }
-}
-
-
-// ========================================
-// PHASE 3.5: Risk Assessment UI
-// ========================================
-let riskState = {
-  mode: 'week',
-  startDate: null,
-  endDate: null,
-  classroomFilter: '',
-  weights: { attendance: 40, cleaning: 30, subject: 30 },
-  lastData: null,
-  requestId: 0
-};
-
-function resetRiskAssessmentState() {
-  riskState.mode = 'week';
-  riskState.startDate = null;
-  riskState.endDate = null;
-  riskState.classroomFilter = '';
-  riskState.weights = { attendance: 40, cleaning: 30, subject: 30 };
-  riskState.lastData = null;
-  riskState.requestId++;
-  $('#risk-classroom').removeData('risk-loaded').empty().append($('<option>').val('').text('ทุกห้อง'));
-  $('#risk-content').addClass('hidden');
-  $('#risk-empty').removeClass('hidden').text('เลือกช่วงวันที่แล้วกดประเมิน');
-  $('#risk-settings-modal, #risk-detail-modal, #risk-daily-modal').hide();
-  if (window.riskPieChart) { window.riskPieChart.destroy(); window.riskPieChart = null; }
-  if (window.riskBarChart) { window.riskBarChart.destroy(); window.riskBarChart = null; }
-}
-
-async function initRiskAssessment() {
-  if (!riskState.startDate) setRiskPeriod(TODAY);
-  $('#risk-view-mode').val(riskState.mode);
-  $('#risk-view-mode').off('change.risk').on('change.risk', function() {
-    riskState.mode = $(this).val();
-    setRiskPeriod(riskState.startDate || TODAY);
-    loadRiskAssessment();
-  });
-  $('#risk-prev').off('click.risk').on('click.risk', function() { shiftRiskPeriod(-1); });
-  $('#risk-next').off('click.risk').on('click.risk', function() { shiftRiskPeriod(1); });
-  $('#risk-run').off('click.risk').on('click.risk', loadRiskAssessment);
-  $('#risk-print-summary').off('click.risk').on('click.risk', printRiskSummary);
-  $('#risk-classroom').off('change.risk').on('change.risk', function() {
-    riskState.classroomFilter = String($(this).val() || '');
-    loadRiskAssessment();
-  });
-  $('#risk-settings-btn').off('click.risk').on('click.risk', function() {
-    $('#risk-w-att').val(riskState.weights.attendance);
-    $('#risk-w-cln').val(riskState.weights.cleaning);
-    $('#risk-w-subj').val(riskState.weights.subject);
-    $('#risk-settings-modal').css('display', 'flex');
-  });
-  $('[data-risk-close]').off('click.risk').on('click.risk', function() {
-    $('#' + $(this).attr('data-risk-close')).hide();
-  });
-  $('#risk-settings-save').off('click.risk').on('click.risk', saveRiskWeightSettings);
-
-  try {
-    await Promise.all([loadRiskClassrooms(), loadRiskWeightSettings()]);
-    if (riskState.lastData) renderRiskAssessment(riskState.lastData);
-    else await loadRiskAssessment();
-  } catch (error) {
-    console.error('Risk assessment initialization error:', error);
-    $('#risk-content').addClass('hidden');
-    $('#risk-empty').removeClass('hidden').text(`เริ่มต้นหน้าประเมินไม่สำเร็จ: ${error.message || 'เกิดข้อผิดพลาด'}`);
-    $.LoadingOverlay('hide');
-    Swal.fire('ผิดพลาด', error.message || 'เริ่มต้นหน้าประเมินความเสี่ยงไม่สำเร็จ', 'error');
-  }
-}
-
-async function loadRiskClassrooms() {
-  const select = $('#risk-classroom');
-  if (select.data('risk-loaded')) return;
-  let rooms = Array.isArray(ALL_CLASSROOMS) ? ALL_CLASSROOMS.slice() : [];
-  if (!rooms.length) {
-    const response = await runGoogleScript('getClassrooms', []);
-    if (response.status !== 'success') throw new Error(response.message || 'โหลดรายชื่อห้องไม่สำเร็จ');
-    rooms = response.data || [];
-    if (typeof ALL_CLASSROOMS !== 'undefined') ALL_CLASSROOMS = rooms;
-  }
-  select.empty().append($('<option>').val('').text('ทุกห้อง'));
-  rooms.forEach(function(room) {
-    select.append($('<option>').val(room.id).text(room.name || room.id));
-  });
-  select.val(riskState.classroomFilter);
-  select.data('risk-loaded', true);
-}
-
-async function loadRiskWeightSettings() {
-  const response = await runGoogleScript('getRiskWeights');
-  if (response.status === 'success' && response.data) {
-    riskState.weights = {
-      attendance: Number(response.data.attendance),
-      cleaning: Number(response.data.cleaning),
-      subject: Number(response.data.subject)
-    };
-    updateRiskWeightsDisplay();
-  }
-}
-
-async function saveRiskWeightSettings() {
-  const weights = {
-    attendance: Number($('#risk-w-att').val()),
-    cleaning: Number($('#risk-w-cln').val()),
-    subject: Number($('#risk-w-subj').val())
-  };
-  if (Object.keys(weights).some(function(key) { return !Number.isFinite(weights[key]) || weights[key] < 0 || weights[key] > 100; }) ||
-      weights.attendance + weights.cleaning + weights.subject <= 0) {
-    Swal.fire('แจ้งเตือน', 'น้ำหนักแต่ละกิจกรรมต้องอยู่ระหว่าง 0 ถึง 100 และผลรวมต้องมากกว่า 0', 'warning');
-    return;
-  }
-  $.LoadingOverlay('show', { text: 'กำลังบันทึกน้ำหนัก...' });
-  try {
-    const response = await runGoogleScript('saveRiskWeights', JSON.stringify(weights));
-    if (response.status !== 'success') throw new Error(response.message || 'บันทึกน้ำหนักไม่สำเร็จ');
-    riskState.weights = weights;
-    updateRiskWeightsDisplay();
-    $('#risk-settings-modal').hide();
-    await loadRiskAssessment();
-    Swal.fire({ icon: 'success', title: 'บันทึกแล้ว', timer: 1200, showConfirmButton: false });
-  } catch (error) {
-    Swal.fire('ผิดพลาด', error.message, 'error');
-  } finally {
-    $.LoadingOverlay('hide');
-  }
-}
-
-function updateRiskWeightsDisplay() {
-  const w = riskState.weights;
-  $('#risk-weights-display').text(`เข้าแถว ${w.attendance}% | เขตพื้นที่ ${w.cleaning}% | เข้าเรียน ${w.subject}%`);
-}
-
-function riskFormatISO(date) {
-  return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
-}
-
-function setRiskPeriod(baseDateStr) {
-  const parts = String(baseDateStr || TODAY).split('-').map(Number);
-  const d = new Date(parts[0], parts[1] - 1, parts[2]);
-  let start;
-  let end;
-  if (riskState.mode === 'week') {
-    const day = d.getDay();
-    start = new Date(d);
-    start.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
-    end = new Date(start);
-    end.setDate(start.getDate() + 4);
-  } else {
-    start = new Date(d.getFullYear(), d.getMonth(), 1);
-    end = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-  }
-  riskState.startDate = riskFormatISO(start);
-  riskState.endDate = riskFormatISO(end);
-  const thaiDate = function(dateStr) {
-    const p = dateStr.split('-');
-    return `${Number(p[2])}/${Number(p[1])}/${Number(p[0]) + 543}`;
-  };
-  const prefix = riskState.mode === 'week' ? 'สัปดาห์' : 'เดือน';
-  $('#risk-date-display').val(`${prefix}: ${thaiDate(riskState.startDate)} - ${thaiDate(riskState.endDate)}`);
-}
-
-function shiftRiskPeriod(direction) {
-  const parts = riskState.startDate.split('-').map(Number);
-  const date = new Date(parts[0], parts[1] - 1, parts[2]);
-  if (riskState.mode === 'week') date.setDate(date.getDate() + direction * 7);
-  else date.setMonth(date.getMonth() + direction);
-  setRiskPeriod(riskFormatISO(date));
-  loadRiskAssessment();
-}
-
-async function loadRiskAssessment() {
-  if (!riskState.startDate || !riskState.endDate) return;
-  const requestId = ++riskState.requestId;
-  riskState.lastData = null;
-  $('#risk-content').addClass('hidden');
-  $('#risk-empty').removeClass('hidden').text('กำลังประเมิน...');
-  $.LoadingOverlay('show', { text: 'กำลังประเมิน...' });
-  try {
-    const response = await runGoogleScript(
-      'getStudentRiskAssessment', riskState.startDate, riskState.endDate,
-      riskState.classroomFilter || '', JSON.stringify(riskState.weights)
-    );
-    if (requestId !== riskState.requestId) return;
-    if (response.status !== 'success') throw new Error(response.message || 'ประเมินไม่สำเร็จ');
-    riskState.lastData = response.data;
-    renderRiskAssessment(response.data);
-    $('#risk-empty').addClass('hidden');
-    $('#risk-content').removeClass('hidden');
-  } catch (error) {
-    if (requestId === riskState.requestId) {
-      console.error('Risk assessment error:', error);
-      riskState.lastData = null;
-      $('#risk-content').addClass('hidden');
-      $('#risk-empty').removeClass('hidden').text(`โหลดผลประเมินไม่สำเร็จ: ${error.message || 'เกิดข้อผิดพลาด'}`);
-      Swal.fire('ผิดพลาด', error.message || 'โหลดผลประเมินไม่สำเร็จ', 'error');
-    }
-  } finally {
-    if (requestId === riskState.requestId) $.LoadingOverlay('hide');
-  }
-}
-
+const riskViewState = {};   // { 'weekly-summary': {...}, 'monthly-summary': {...} }
 function riskEscapeHtml(value) {
   return String(value == null ? '' : value).replace(/[&<>"']/g, function(char) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char];
   });
 }
 
-function riskCategoryLabel(category) {
-  return category === 'red' ? '🔴 ใกล้ชิด' : category === 'yellow' ? '🟡 ห่วงใย' : '🟢 ไว้ใจ';
-}
-
-function renderRiskAssessment(data) {
-  if (!data || typeof data !== 'object' || !data.summary || !data.period) throw new Error('รูปแบบข้อมูลประเมินไม่ถูกต้อง');
-  const summary = Object.assign({ red: 0, yellow: 0, green: 0, avgScore: 0, totalStudents: 0, scoredStudents: 0 }, data.summary);
-  const students = (Array.isArray(data.students) ? data.students : []).filter(function(student) { return student && typeof student === 'object'; }).map(function(student) {
-    const composite = student.composite === null || student.composite === undefined ? null : Number(student.composite);
-    return Object.assign({}, student, {
-      composite: Number.isFinite(composite) ? composite : null,
-      category: ['red', 'yellow', 'green'].includes(student.category) ? student.category : 'yellow',
-      breakdown: Object.assign({ attendance: null, cleaning: null, subject: null }, student.breakdown || {}),
-      dailyScores: student.dailyScores && typeof student.dailyScores === 'object' ? student.dailyScores : {}
-    });
+function logGeneratedRiskDocumentFor(tabId, documentType, studentId, documentNo) {
+  const st = riskViewState[tabId];
+  const period = st && st.lastData && st.lastData.period ? st.lastData.period : {};
+  let actorName = '';
+  try {
+    const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
+    actorName = teacher.name || '';
+  } catch (error) {
+    console.warn('Could not read current app user name for document log:', error);
+  }
+  return runGoogleScript(
+    'logRiskDocumentGeneration', documentType, studentId || '',
+    period.startDate || '', period.endDate || '', documentNo || '', actorName
+  ).then(function(response) {
+    if (!response || response.status !== 'success') throw new Error((response && response.message) || 'บันทึกไม่สำเร็จ');
+  }).catch(function(error) {
+    console.error('Document created, but its log entry could not be saved:', error);
+    Swal.fire('แจ้งเตือน', `สร้างเอกสารแล้ว แต่บันทึกประวัติการสร้างเอกสารไม่สำเร็จ: ${error.message || 'เกิดข้อผิดพลาด'}`, 'warning');
   });
-  const dates = Array.isArray(data.period.dates) ? data.period.dates : [];
-  $('#risk-card-red').text(summary.red || 0);
-  $('#risk-card-yellow').text(summary.yellow || 0);
-  $('#risk-card-green').text(summary.green || 0);
-  $('#risk-card-avg').text(summary.scoredStudents ? `${summary.avgScore}%` : '—');
-  $('#risk-card-total').text(`จาก ${summary.totalStudents || 0} คน (${summary.scoredStudents || 0} คนมีข้อมูล)`);
-  renderRiskCharts(summary, students, dates);
-  renderRiskGrid(students, dates);
-  renderRiskList('red', students.filter(function(student) { return student.category === 'red'; }));
-  renderRiskList('yellow', students.filter(function(student) { return student.category === 'yellow'; }));
-  renderRiskList('green', students.filter(function(student) { return student.category === 'green'; }));
 }
 
-function riskWeekStart(dateStr) {
-  const p = dateStr.split('-').map(Number);
-  const date = new Date(p[0], p[1] - 1, p[2]);
-  const day = date.getDay();
-  date.setDate(date.getDate() - (day === 0 ? 6 : day - 1));
-  return riskFormatISO(date);
+$(document).off('click.riskViewClose', '[data-risk-close]').on('click.riskViewClose', '[data-risk-close]', function() {
+  $('#' + $(this).attr('data-risk-close')).hide();
+});
+
+
+function initRiskView(tabId) {
+  const $tab = $('#' + tabId);
+  const mode = $tab.data('risk-mode') || 'week';
+  const prefix = $tab.data('risk-prefix') || 'r';
+
+  if (!$tab.data('initialized')) {
+    $tab.data('initialized', true);
+    $tab.html(buildRiskViewHtml(prefix));
+    const $roomSel = $tab.find('.' + prefix + '-classroom');
+    ALL_CLASSROOMS.forEach(c => $roomSel.append(`<option value="${c.id}">${c.name}</option>`));
+    riskViewState[tabId] = {
+      mode, prefix,
+      startDate: null, endDate: null,
+      classroomFilter: '',
+      weights: { attendance: 40, cleaning: 30, subject: 30 },
+      lastData: null,
+      loaded: false
+    };
+    $tab.find('.' + prefix + '-prev').on('click', () => shiftRiskView(tabId, -1));
+    $tab.find('.' + prefix + '-next').on('click', () => shiftRiskView(tabId, 1));
+    $tab.find('.' + prefix + '-run').on('click', () => loadRiskView(tabId));
+    $tab.find('.' + prefix + '-print').on('click', () => printRiskSummaryFor(tabId));
+    $tab.find('.' + prefix + '-settings').on('click', () => openRiskSettings(tabId));
+    $tab.find('.' + prefix + '-classroom').on('change', function() {
+      riskViewState[tabId].classroomFilter = $(this).val();
+    });
+    $tab.find('.' + prefix + '-settings-save').on('click', () => saveRiskSettings(tabId));
+    setRiskPeriodFor(tabId, TODAY);
+  }
+
+  const st = riskViewState[tabId];
+  if (!st) return;
+
+  // Re-read the shared setting on each tab entry and synchronize all initialized views.
+  runGoogleScript('getRiskWeights').then(function(res) {
+    if (!res || res.status !== 'success' || !res.data) {
+      throw new Error((res && res.message) || 'โหลดค่าน้ำหนักไม่สำเร็จ');
+    }
+    Object.keys(riskViewState).forEach(function(otherId) {
+      const other = riskViewState[otherId];
+      if (!other) return;
+      other.weights = res.data;
+      $('#' + otherId).find('.' + other.prefix + '-weights').text(riskWeightsText(res.data));
+    });
+  }).catch(function(error) {
+    console.warn('Could not refresh shared risk weights:', error);
+  }).finally(function() {
+    const current = riskViewState[tabId];
+    if (!current) return;
+    if (current.lastData) {
+      renderRiskView(tabId, current.lastData);
+      $tab.find('.' + current.prefix + '-empty').addClass('hidden');
+      $tab.find('.' + current.prefix + '-content').removeClass('hidden');
+    } else {
+      loadRiskView(tabId);
+    }
+  });
 }
 
-function renderRiskCharts(summary, students, dates) {
-  const pieCanvas = document.getElementById('risk-pie-chart');
-  if (pieCanvas && typeof Chart !== 'undefined') {
-    if (window.riskPieChart) window.riskPieChart.destroy();
-    window.riskPieChart = new Chart(pieCanvas.getContext('2d'), {
+function riskWeightsText(w) {
+  return `เข้าแถว ${w.attendance}% | เขตพื้นที่ ${w.cleaning}% | เข้าเรียน ${w.subject}%`;
+}
+
+function buildRiskViewHtml(prefix) {
+  const p = prefix;
+  return `
+    <div class="app-card p-5 mb-5">
+      <div class="flex flex-col md:flex-row gap-3 items-end flex-wrap">
+        <div>
+          <label class="block text-gray-500 text-sm font-bold mb-1">📅 ช่วงวันที่</label>
+          <input type="text" id="${p}-date-display" class="w-full" readonly style="min-width:240px;">
+        </div>
+        <div>
+          <label class="block text-gray-500 text-sm font-bold mb-1">🏫 ห้อง</label>
+          <select class="${p}-classroom w-full">
+            <option value="">ทุกห้อง</option>
+          </select>
+        </div>
+        <div class="flex gap-2 ml-auto flex-wrap">
+          <button class="${p}-settings px-4 py-2 bg-gray-100 text-gray-700 rounded-xl font-bold active:scale-95">⚙️ ตั้งค่า</button>
+          <button class="${p}-prev px-3 py-2 bg-gray-100 rounded-xl font-bold active:scale-95">◀</button>
+          <button class="${p}-next px-3 py-2 bg-gray-100 rounded-xl font-bold active:scale-95">▶</button>
+          <button class="${p}-run px-6 py-2 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-xl font-bold shadow-lg active:scale-95">🔍 ประเมิน</button>
+          <button class="${p}-print px-4 py-2 bg-slate-700 text-white rounded-xl font-bold active:scale-95">🖨️ พิมพ์รายงาน</button>
+        </div>
+      </div>
+      <div class="mt-2 text-xs text-gray-400">น้ำหนัก: <span class="${p}-weights">เข้าแถว 40% | เขตพื้นที่ 30% | เข้าเรียน 30%</span></div>
+    </div>
+
+    <div class="${p}-empty app-card p-5 text-center py-12 text-gray-400">กำลังโหลด...</div>
+
+    <div class="${p}-content hidden">
+      <div class="app-card p-5 mb-5">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div class="p-4 rounded-2xl" style="background:#fef2f2;">
+            <div class="text-xs font-bold text-rose-800">🔴 กลุ่มใกล้ชิด</div>
+            <div class="${p}-card-red text-3xl font-extrabold text-rose-700 mt-1">0</div>
+            <div class="text-xs text-rose-500">ต้องติดตามทันที</div>
+          </div>
+          <div class="p-4 rounded-2xl" style="background:#fefce8;">
+            <div class="text-xs font-bold text-amber-800">🟡 กลุ่มห่วงใย</div>
+            <div class="${p}-card-yellow text-3xl font-extrabold text-amber-700 mt-1">0</div>
+            <div class="text-xs text-amber-500">ต้องเฝ้าระวัง</div>
+          </div>
+          <div class="p-4 rounded-2xl" style="background:#f0fdf4;">
+            <div class="text-xs font-bold text-emerald-800">🟢 กลุ่มไว้ใจ</div>
+            <div class="${p}-card-green text-3xl font-extrabold text-emerald-700 mt-1">0</div>
+            <div class="text-xs text-emerald-500">ทำได้ดี</div>
+          </div>
+          <div class="p-4 rounded-2xl" style="background:#eff6ff;">
+            <div class="text-xs font-bold text-blue-800">⭐ คะแนนเฉลี่ย</div>
+            <div class="${p}-card-avg text-3xl font-extrabold text-blue-700 mt-1">0%</div>
+            <div class="${p}-card-total text-xs text-blue-500">จาก 0 คน</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="app-card p-5 mb-5">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div class="bg-gray-50 p-4 rounded-2xl h-80"><canvas id="${p}-pie-chart"></canvas></div>
+          <div class="bg-gray-50 p-4 rounded-2xl h-80"><canvas id="${p}-bar-chart"></canvas></div>
+        </div>
+      </div>
+
+      <div class="app-card p-5 mb-5">
+        <div class="flex justify-between items-center mb-3 flex-wrap gap-2">
+          <h3 class="text-lg font-bold text-gray-800">📊 ตารางรายวัน</h3>
+          <div class="flex gap-2 text-xs">
+            <span class="px-2 py-1 bg-rose-100 text-rose-700 rounded">🔴 &lt; 60%</span>
+            <span class="px-2 py-1 bg-amber-100 text-amber-700 rounded">🟡 60-84%</span>
+            <span class="px-2 py-1 bg-emerald-100 text-emerald-700 rounded">🟢 ≥ 85%</span>
+            <span class="px-2 py-1 bg-gray-100 text-gray-500 rounded">⚪ ไม่มีข้อมูล</span>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="min-w-full">
+            <thead class="${p}-grid-thead"></thead>
+            <tbody class="${p}-grid-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="app-card p-5 mb-5 ${p}-list-red-wrap">
+        <h3 class="text-lg font-bold text-rose-700 mb-3">🔴 กลุ่มใกล้ชิด (ต้องติดตามทันที)</h3>
+        <div class="table-responsive">
+          <table class="min-w-full">
+            <thead>
+              <tr class="bg-rose-700 text-white">
+                <th class="p-3 text-center">ห้อง</th>
+                <th class="p-3 text-left">ชื่อ-สกุล</th>
+                <th class="p-3 text-center">เข้าแถว</th>
+                <th class="p-3 text-center">เขตพื้นที่</th>
+                <th class="p-3 text-center">เข้าเรียน</th>
+                <th class="p-3 text-center">รวม</th>
+                <th class="p-3 text-center">Streak</th>
+                <th class="p-3 text-center">ดำเนินการ</th>
+              </tr>
+            </thead>
+            <tbody class="${p}-list-red"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="app-card p-5 mb-5 ${p}-list-yellow-wrap">
+        <h3 class="text-lg font-bold text-amber-700 mb-3">🟡 กลุ่มห่วงใย (เฝ้าระวัง)</h3>
+        <div class="table-responsive">
+          <table class="min-w-full">
+            <thead>
+              <tr class="bg-amber-700 text-white">
+                <th class="p-3 text-center">ห้อง</th>
+                <th class="p-3 text-left">ชื่อ-สกุล</th>
+                <th class="p-3 text-center">เข้าแถว</th>
+                <th class="p-3 text-center">เขตพื้นที่</th>
+                <th class="p-3 text-center">เข้าเรียน</th>
+                <th class="p-3 text-center">รวม</th>
+                <th class="p-3 text-center">Streak</th>
+                <th class="p-3 text-center">ดู</th>
+              </tr>
+            </thead>
+            <tbody class="${p}-list-yellow"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="app-card p-5 ${p}-list-green-wrap">
+        <h3 class="text-lg font-bold text-emerald-700 mb-3">🟢 กลุ่มไว้ใจ (ทำได้ดี)</h3>
+        <div class="table-responsive">
+          <table class="min-w-full">
+            <thead>
+              <tr class="bg-emerald-700 text-white">
+                <th class="p-3 text-center">ห้อง</th>
+                <th class="p-3 text-left">ชื่อ-สกุล</th>
+                <th class="p-3 text-center">เข้าแถว</th>
+                <th class="p-3 text-center">เขตพื้นที่</th>
+                <th class="p-3 text-center">เข้าเรียน</th>
+                <th class="p-3 text-center">รวม</th>
+                <th class="p-3 text-center">Streak</th>
+                <th class="p-3 text-center">ดู</th>
+              </tr>
+            </thead>
+            <tbody class="${p}-list-green"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings modal -->
+    <div id="${p}-settings-modal" class="fixed inset-0 z-[55] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" style="display:none;">
+      <div class="app-card w-full max-w-md bg-white rounded-3xl overflow-hidden">
+        <div class="flex justify-between items-center p-5 bg-gradient-to-r from-slate-800 to-slate-900 text-white">
+          <h2 class="text-lg font-bold">⚙️ ตั้งค่าน้ำหนัก</h2>
+          <button onclick="$('#${p}-settings-modal').hide()" class="text-white text-2xl hover:opacity-75">×</button>
+        </div>
+        <div class="p-5 space-y-4">
+          <div><label class="block text-sm font-bold mb-1">📝 เข้าแถว</label><input type="number" id="${p}-w-att" class="w-full" min="0" max="100"></div>
+          <div><label class="block text-sm font-bold mb-1">🧹 เขตพื้นที่</label><input type="number" id="${p}-w-cln" class="w-full" min="0" max="100"></div>
+          <div><label class="block text-sm font-bold mb-1">📚 เข้าเรียน</label><input type="number" id="${p}-w-subj" class="w-full" min="0" max="100"></div>
+        </div>
+        <div class="p-5 flex gap-3">
+          <button onclick="$('#${p}-settings-modal').hide()" class="flex-1 py-3 bg-gray-100 rounded-2xl font-bold">ยกเลิก</button>
+          <button class="${p}-settings-save flex-1 py-3 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-2xl font-bold">บันทึก</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function setRiskPeriodFor(tabId, baseDateStr) {
+  const st = riskViewState[tabId];
+  if (!st) return;
+  const d = new Date(baseDateStr);
+  let start, end;
+  if (st.mode === 'week') {
+    const dow = d.getDay();
+    start = new Date(d); start.setDate(d.getDate() - dow + (dow === 0 ? -6 : 1));
+    end = new Date(start); end.setDate(start.getDate() + 4);
+  } else {
+    start = new Date(d.getFullYear(), d.getMonth(), 1);
+    end = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+  }
+  const fmt = (dt) => [dt.getFullYear(), String(dt.getMonth()+1).padStart(2,'0'), String(dt.getDate()).padStart(2,'0')].join('-');
+  st.startDate = fmt(start);
+  st.endDate = fmt(end);
+
+  const fmtThai = (ds) => { const p = ds.split('-'); return `${parseInt(p[2])}/${parseInt(p[1])}/${parseInt(p[0])+543}`; };
+  const label = (st.mode === 'week' ? 'สัปดาห์' : 'เดือน') + `: ${fmtThai(st.startDate)} - ${fmtThai(st.endDate)}`;
+  $('#' + tabId).find('.' + st.prefix + '-date-display').val(label);
+}
+
+function shiftRiskView(tabId, dir) {
+  const st = riskViewState[tabId];
+  if (!st) return;
+  const d = new Date(st.startDate);
+  if (st.mode === 'week') d.setDate(d.getDate() + dir * 7);
+  else d.setMonth(d.getMonth() + dir, 1);
+  setRiskPeriodFor(tabId, d.toISOString().split('T')[0]);
+  loadRiskView(tabId);
+}
+
+async function loadRiskView(tabId) {
+  const st = riskViewState[tabId];
+  if (!st || !st.startDate) return;
+  const $tab = $('#' + tabId);
+
+  $.LoadingOverlay("show", { text: "กำลังประเมิน..." });
+  try {
+    const res = await runGoogleScript('getStudentRiskAssessment', st.startDate, st.endDate, st.classroomFilter || '', JSON.stringify(st.weights));
+    if (res.status !== 'success') throw new Error(res.message);
+    st.lastData = res.data;
+    renderRiskView(tabId, res.data);
+    $tab.find('.' + st.prefix + '-empty').addClass('hidden');
+    $tab.find('.' + st.prefix + '-content').removeClass('hidden');
+  } catch (err) {
+    console.error('Error:', err);
+    Swal.fire('ผิดพลาด', err.message, 'error');
+  } finally {
+    $.LoadingOverlay("hide");
+  }
+}
+
+function renderRiskView(tabId, data) {
+  const st = riskViewState[tabId];
+  const $tab = $('#' + tabId);
+  const p = st.prefix;
+  const { summary, students, period } = data;
+
+  $tab.find('.' + p + '-card-red').text(summary.red);
+  $tab.find('.' + p + '-card-yellow').text(summary.yellow);
+  $tab.find('.' + p + '-card-green').text(summary.green);
+  $tab.find('.' + p + '-card-avg').text(summary.avgScore + '%');
+  $tab.find('.' + p + '-card-total').text(`จาก ${summary.totalStudents} คน`);
+
+  renderRiskViewCharts(tabId, summary, students);
+  renderRiskViewGrid(tabId, students, period.dates);
+  renderRiskViewList(tabId, 'red', students.filter(s => s.category === 'red'));
+  renderRiskViewList(tabId, 'yellow', students.filter(s => s.category === 'yellow'));
+  renderRiskViewList(tabId, 'green', students.filter(s => s.category === 'green'));
+}
+
+function renderRiskViewCharts(tabId, summary, students) {
+  const st = riskViewState[tabId];
+  const p = st.prefix;
+
+  const pieCanvas = document.getElementById(p + '-pie-chart');
+  if (pieCanvas) {
+    if (window[p + 'PieChart']) window[p + 'PieChart'].destroy();
+    window[p + 'PieChart'] = new Chart(pieCanvas.getContext('2d'), {
       type: 'pie',
       data: {
-        labels: ['🔴 ใกล้ชิด', '🟡 ห่วงใย / ไม่มีข้อมูล', '🟢 ไว้ใจ'],
-        datasets: [{ data: [summary.red || 0, summary.yellow || 0, summary.green || 0], backgroundColor: ['#ef4444', '#eab308', '#10b981'] }]
+        labels: ['🔴 ใกล้ชิด', '🟡 ห่วงใย', '🟢 ไว้ใจ'],
+        datasets: [{ data: [summary.red, summary.yellow, summary.green], backgroundColor: ['#ef4444', '#eab308', '#10b981'] }]
       },
-      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' }, title: { display: true, text: 'สัดส่วนกลุ่มความเสี่ยง' } } }
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' }, title: { display: true, text: 'สัดส่วนกลุ่ม' } } }
     });
   }
 
-  const weeks = {};
-  (dates || []).forEach(function(date) {
-    const key = riskWeekStart(date);
-    if (!weeks[key]) weeks[key] = [];
-    weeks[key].push(date);
-  });
-  const labels = Object.keys(weeks).sort().map(function(start) {
-    const p = start.split('-');
-    return `สัปดาห์ ${Number(p[2])}/${Number(p[1])}`;
-  });
-  const counts = { red: [], yellow: [], green: [] };
-  Object.keys(weeks).sort().forEach(function(weekStart) {
-    const weekDates = weeks[weekStart];
-    const count = { red: 0, yellow: 0, green: 0 };
-    students.forEach(function(student) {
-      const values = weekDates.map(function(date) {
-        const day = student.dailyScores && student.dailyScores[date];
-        return day && Number.isFinite(Number(day.score)) ? Number(day.score) : null;
-      }).filter(function(value) { return value !== null; });
-      if (!values.length) return;
-      const average = values.reduce(function(sum, value) { return sum + value; }, 0) / values.length;
-      const category = average >= 85 ? 'green' : average >= 60 ? 'yellow' : 'red';
-      count[category]++;
-    });
-    ['red', 'yellow', 'green'].forEach(function(category) { counts[category].push(count[category]); });
-  });
-  const barCanvas = document.getElementById('risk-bar-chart');
-  if (barCanvas && typeof Chart !== 'undefined') {
-    if (window.riskBarChart) window.riskBarChart.destroy();
-    window.riskBarChart = new Chart(barCanvas.getContext('2d'), {
+  const top15 = students.slice(0, 15);
+  const barCanvas = document.getElementById(p + '-bar-chart');
+  if (barCanvas) {
+    if (window[p + 'BarChart']) window[p + 'BarChart'].destroy();
+    window[p + 'BarChart'] = new Chart(barCanvas.getContext('2d'), {
       type: 'bar',
       data: {
-        labels: labels,
-        datasets: [
-          { label: '🔴 ใกล้ชิด', data: counts.red, backgroundColor: '#ef4444' },
-          { label: '🟡 ห่วงใย', data: counts.yellow, backgroundColor: '#eab308' },
-          { label: '🟢 ไว้ใจ', data: counts.green, backgroundColor: '#10b981' }
-        ]
+        labels: top15.map(s => s.name.length > 15 ? s.name.substring(0, 15) + '…' : s.name),
+        datasets: [{ label: 'Composite', data: top15.map(s => s.composite), backgroundColor: top15.map(s => s.category === 'red' ? '#ef4444' : s.category === 'yellow' ? '#eab308' : '#10b981') }]
       },
-      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' }, title: { display: true, text: 'แนวโน้มรายสัปดาห์ (ค่าเฉลี่ยรายวัน)' } }, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } } }
+      options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y', plugins: { legend: { display: false }, title: { display: true, text: '15 อันดับแรก' } }, scales: { x: { beginAtZero: true, max: 100 } } }
     });
   }
 }
 
-function renderRiskGrid(students, dates) {
+function renderRiskViewGrid(tabId, students, dates) {
+  const st = riskViewState[tabId];
+  const $tab = $('#' + tabId);
+  const p = st.prefix;
   const dayNames = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
-  let header = '<tr class="bg-slate-800 text-white"><th class="p-2 text-left">ชื่อ-สกุล</th><th class="p-2 text-center">ห้อง</th>';
-  dates.forEach(function(date) {
-    const p = date.split('-').map(Number);
-    const day = new Date(p[0], p[1] - 1, p[2]).getDay();
-    header += `<th class="p-2 text-center text-xs">${dayNames[day]}<br><span class="opacity-75">${p[2]}/${p[1]}</span></th>`;
+
+  let thead = '<tr class="bg-slate-800 text-white"><th class="p-2 text-left">ชื่อ-สกุล</th><th class="p-2 text-center">ห้อง</th>';
+  dates.forEach(d => {
+    const dt = new Date(d);
+    const parts = d.split('-');
+    thead += `<th class="p-2 text-center text-xs">${dayNames[dt.getDay()]}<br><span class="opacity-75">${parseInt(parts[2])}/${parseInt(parts[1])}</span></th>`;
   });
-  header += '<th class="p-2 text-center">รวม</th><th class="p-2 text-center">กลุ่ม</th></tr>';
-  $('#risk-grid-thead').html(header);
-  const tbody = $('#risk-grid-tbody').empty();
-  if (!students.length) {
-    tbody.append(`<tr><td colspan="${dates.length + 4}" class="text-center p-6 text-gray-400">ไม่มีรายชื่อนักเรียนในช่วงที่เลือก</td></tr>`);
-    return;
-  }
-  students.forEach(function(student) {
-    let row = `<tr class="border-b border-gray-100 hover:bg-blue-50"><td class="p-2 text-gray-800 text-sm font-medium">${riskEscapeHtml(student.name)}</td><td class="p-2 text-center text-gray-600 text-xs">${riskEscapeHtml(student.classroom_name)}</td>`;
-    dates.forEach(function(date) {
-      const day = student.dailyScores && student.dailyScores[date];
-      if (!day) row += '<td class="p-2 text-center text-gray-300 text-xs">⚪</td>';
+  thead += '<th class="p-2 text-center">รวม</th><th class="p-2 text-center">กลุ่ม</th></tr>';
+  $tab.find('.' + p + '-grid-thead').html(thead);
+
+  const tbody = $tab.find('.' + p + '-grid-tbody').empty();
+  const cellColors = {
+    green: 'background:#dcfce7;color:#166534;font-weight:bold;',
+    yellow: 'background:#fef3c7;color:#92400e;font-weight:bold;',
+    red: 'background:#fee2e2;color:#991b1b;font-weight:bold;'
+  };
+  const catBadge = { green: 'bg-emerald-100 text-emerald-700', yellow: 'bg-amber-100 text-amber-700', red: 'bg-rose-100 text-rose-700' };
+  const catLabel = { green: '🟢', yellow: '🟡', red: '🔴' };
+
+  students.forEach(s => {
+    let html = `<tr class="border-b border-gray-100 hover:bg-blue-50">`;
+    html += `<td class="p-2 text-gray-800 text-sm font-medium">${s.name}</td>`;
+    html += `<td class="p-2 text-center text-gray-600 text-xs">${s.classroom_name}</td>`;
+    dates.forEach(d => {
+      const day = s.dailyScores[d];
+      if (!day) html += '<td class="p-2 text-center text-gray-300 text-xs">⚪</td>';
       else {
-        const color = day.category === 'green' ? 'background:#dcfce7;color:#166534' : day.category === 'yellow' ? 'background:#fef3c7;color:#92400e' : 'background:#fee2e2;color:#991b1b';
-        row += `<td class="p-1 text-center text-xs"><button type="button" class="risk-daily-button rounded px-2 py-1 font-bold" style="${color}" data-student-id="${riskEscapeHtml(student.id)}" data-classroom-id="${riskEscapeHtml(student.classroom_id)}" data-risk-date="${date}" title="คะแนน ${day.score}%">${day.score}%</button></td>`;
+        const clickFn = `onclick="showRiskDailyFor('${tabId}','${s.id}','${(s.name||'').replace(/'/g,'\\\'')}','${d}')"`;
+        html += `<td class="p-2 text-center text-xs cursor-pointer hover:opacity-80" style="${cellColors[day.category]}" ${clickFn}>${day.score}%</td>`;
       }
     });
-    const composite = student.composite === null ? '—' : `${student.composite}%`;
-    row += `<td class="p-2 text-center font-bold text-gray-800">${composite}</td><td class="p-2 text-center"><span class="px-2 py-1 rounded-lg text-xs font-bold">${riskCategoryLabel(student.category)}</span></td></tr>`;
-    tbody.append(row);
-  });
-  tbody.off('click.risk', '.risk-daily-button').on('click.risk', '.risk-daily-button', function() {
-    showRiskDaily($(this).attr('data-student-id'), $(this).attr('data-classroom-id'), $(this).attr('data-risk-date'));
+    html += `<td class="p-2 text-center font-bold text-gray-800">${s.composite}%</td>`;
+    html += `<td class="p-2 text-center"><span class="px-2 py-1 rounded-lg text-xs font-bold ${catBadge[s.category]}">${catLabel[s.category]} ${s.composite}%</span></td></tr>`;
+    tbody.append(html);
   });
 }
 
-function renderRiskList(category, students) {
-  const tbody = $(`#risk-list-${category}`).empty();
-  const container = $(`#risk-list-${category}-container`);
-  if (!students.length) { container.hide(); return; }
-  container.show();
-  students.forEach(function(student) {
-    const pct = function(item) {
-      if (!item) return '<span class="text-gray-300">—</span>';
-      const color = item.score >= 85 ? 'text-emerald-600' : item.score >= 60 ? 'text-amber-600' : 'text-rose-600';
-      return `<span class="font-bold ${color}">${item.score}%</span>`;
-    };
-    const studentId = riskEscapeHtml(student.id);
-    const classroomId = riskEscapeHtml(student.classroom_id);
-    const printButtons = category === 'red' ? `
-      <button type="button" class="risk-print-warning px-2 py-1 bg-rose-100 text-rose-700 rounded-lg text-xs font-bold hover:bg-rose-200 mr-1" data-student-id="${studentId}" data-classroom-id="${classroomId}" title="พิมพ์หนังสือแจ้งเตือน">📄</button>
-      <button type="button" class="risk-print-activity px-2 py-1 bg-orange-100 text-orange-700 rounded-lg text-xs font-bold hover:bg-orange-200 mr-1" data-student-id="${studentId}" data-classroom-id="${classroomId}" title="พิมพ์หนังสือทำกิจกรรม">📋</button>
-    ` : '';
-    tbody.append(`<tr class="border-b border-gray-100 hover:bg-blue-50"><td class="p-3 text-center text-gray-600 text-sm">${riskEscapeHtml(student.classroom_name)}</td><td class="p-3 text-gray-800 font-medium">${riskEscapeHtml(student.name)}</td><td class="p-3 text-center">${pct(student.breakdown.attendance)}</td><td class="p-3 text-center">${pct(student.breakdown.cleaning)}</td><td class="p-3 text-center">${pct(student.breakdown.subject)}</td><td class="p-3 text-center font-bold text-lg">${student.composite === null ? '—' : `${student.composite}%`}</td><td class="p-3 text-center">${student.streak > 0 ? `${student.streak} วัน` : '—'}</td><td class="p-3 text-center whitespace-nowrap">${printButtons}<button type="button" class="risk-student-detail px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-bold" data-student-id="${studentId}" data-classroom-id="${classroomId}" title="ดูรายละเอียด">👁️</button></td></tr>`);
-  });
-  tbody.off('click.risk', '.risk-student-detail').on('click.risk', '.risk-student-detail', function() {
-    showRiskDetail($(this).attr('data-student-id'), $(this).attr('data-classroom-id'));
-  });
-  tbody.off('click.risk', '.risk-print-warning').on('click.risk', '.risk-print-warning', function() {
-    openPrintWarning($(this).attr('data-student-id'), $(this).attr('data-classroom-id'));
-  });
-  tbody.off('click.risk', '.risk-print-activity').on('click.risk', '.risk-print-activity', function() {
-    openPrintActivity($(this).attr('data-student-id'), $(this).attr('data-classroom-id'));
+function renderRiskViewList(tabId, category, students) {
+  const st = riskViewState[tabId];
+  const $tab = $('#' + tabId);
+  const p = st.prefix;
+  const tbody = $tab.find('.' + p + '-list-' + category).empty();
+  const wrap = $tab.find('.' + p + '-list-' + category + '-wrap');
+
+  if (students.length === 0) { wrap.hide(); return; }
+  wrap.show();
+
+  students.forEach(s => {
+    const fmtPct = (b) => b ? `<span class="font-bold ${b.score >= 85 ? 'text-emerald-600' : b.score >= 60 ? 'text-amber-600' : 'text-rose-600'}">${b.score}%</span>` : '<span class="text-gray-300">—</span>';
+
+    let actionCol = '';
+    if (category === 'red') {
+      actionCol = `
+        <button onclick="openPrintWarningFor('${tabId}','${s.id}')" class="px-2 py-1 bg-rose-100 text-rose-700 rounded-lg text-xs font-bold hover:bg-rose-200 mr-1" title="แจ้งเตือน">📄</button>
+        <button onclick="openPrintActivityFor('${tabId}','${s.id}')" class="px-2 py-1 bg-orange-100 text-orange-700 rounded-lg text-xs font-bold hover:bg-orange-200 mr-1" title="ทำกิจกรรม">📋</button>
+        <button onclick="showRiskDetailFor('${tabId}','${s.id}')" class="px-2 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-bold hover:bg-blue-200">👁️</button>`;
+    } else {
+      actionCol = `<button onclick="showRiskDetailFor('${tabId}','${s.id}')" class="px-2 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-bold hover:bg-blue-200">👁️</button>`;
+    }
+
+    tbody.append(`
+      <tr class="border-b border-gray-100 hover:bg-blue-50">
+        <td class="p-3 text-center text-gray-600 text-sm">${s.classroom_name}</td>
+        <td class="p-3 text-gray-800 font-medium">${s.name}</td>
+        <td class="p-3 text-center">${fmtPct(s.breakdown.attendance)}</td>
+        <td class="p-3 text-center">${fmtPct(s.breakdown.cleaning)}</td>
+        <td class="p-3 text-center">${fmtPct(s.breakdown.subject)}</td>
+        <td class="p-3 text-center font-bold text-lg">${s.composite}%</td>
+        <td class="p-3 text-center">${s.streak > 0 ? `<span class="px-2 py-1 rounded-lg text-xs font-bold bg-rose-100 text-rose-700">${s.streak} วัน</span>` : '—'}</td>
+        <td class="p-3 text-center whitespace-nowrap">${actionCol}</td>
+      </tr>
+    `);
   });
 }
 
-function riskEventsText(events, kind) {
-  if (!events || !events.length) return 'ไม่มีข้อมูล';
-  return events.map(function(event) {
-    let label = event.status || '';
-    if (kind === 'attendance' && event.period) label += ` (${event.period})`;
-    if (kind === 'subject' && event.subject) label += ` [${event.subject}]`;
-    return riskEscapeHtml(label);
-  }).join('<br>');
+// ===== Settings =====
+function openRiskSettings(tabId) {
+  const st = riskViewState[tabId];
+  if (!st) return;
+  const p = st.prefix;
+  $('#' + p + '-w-att').val(st.weights.attendance);
+  $('#' + p + '-w-cln').val(st.weights.cleaning);
+  $('#' + p + '-w-subj').val(st.weights.subject);
+  $('#' + p + '-settings-modal').css('display', 'flex');
 }
 
-function riskBreakdownCard(icon, label, data, color) {
-  if (!data) return `<div class="p-3 rounded-xl bg-gray-100"><div class="text-xs font-bold text-gray-500">${icon} ${label}</div><div class="text-lg font-extrabold text-gray-400 mt-1">ไม่มีข้อมูล</div></div>`;
-  return `<div class="p-3 rounded-xl" style="background:${color.bg}"><div class="text-xs font-bold" style="color:${color.text}">${icon} ${label}</div><div class="text-2xl font-extrabold mt-1" style="color:${color.text}">${data.score}%</div><div class="text-xs mt-1" style="color:${color.text}">${data.points} / ${data.total} ครั้ง</div></div>`;
-}
-
-async function riskFetchStudentDetail(studentId, classroomId) {
-  const response = await runGoogleScript('getStudentRiskDetail', studentId, riskState.startDate, riskState.endDate, classroomId || '', JSON.stringify(riskState.weights));
-  if (response.status !== 'success') throw new Error(response.message || 'โหลดรายละเอียดไม่สำเร็จ');
-  const data = response.data;
-  if (!data || !data.student || !Array.isArray(data.days)) throw new Error('รูปแบบข้อมูลรายละเอียดไม่ถูกต้อง');
-  const student = Object.assign({}, data.student, { breakdown: Object.assign({ attendance: null, cleaning: null, subject: null }, data.student.breakdown || {}) });
-  const days = data.days.filter(function(day) { return day && typeof day === 'object'; }).map(function(day) {
-    return Object.assign({}, day, {
-      attendance: Array.isArray(day.attendance) ? day.attendance : [],
-      cleaning: Array.isArray(day.cleaning) ? day.cleaning : [],
-      subject: Array.isArray(day.subject) ? day.subject : []
-    });
-  });
-  return Object.assign({}, data, { student: student, days: days });
-}
-
-async function showRiskDetail(studentId, classroomId) {
-  $('#risk-detail-title').text('กำลังโหลดรายละเอียด...');
-  $('#risk-detail-sub').text('');
-  $('#risk-detail-modal').css('display', 'flex');
-  $('#risk-detail-tbody').html('<tr><td colspan="5" class="text-center p-5 text-gray-400">กำลังโหลด...</td></tr>');
-  try {
-    const data = await riskFetchStudentDetail(studentId, classroomId);
-    const student = data.student;
-    $('#risk-detail-title').text(`👁️ ${student.name}`);
-    $('#risk-detail-sub').text(`ห้อง ${student.classroom_name} | Composite ${student.composite === null ? '—' : `${student.composite}%`} | ${riskCategoryLabel(student.category)}`);
-    $('#risk-detail-breakdown').html(
-      riskBreakdownCard('📝', 'เข้าแถว', student.breakdown.attendance, { bg: '#dcfce7', text: '#166534' }) +
-      riskBreakdownCard('🧹', 'เขตพื้นที่', student.breakdown.cleaning, { bg: '#dbeafe', text: '#1e40af' }) +
-      riskBreakdownCard('📚', 'เข้าเรียน', student.breakdown.subject, { bg: '#f3e8ff', text: '#6b21a8' })
-    );
-    const tbody = $('#risk-detail-tbody').empty();
-    data.days.forEach(function(day) {
-      const hasEvents = day.attendance.length || day.cleaning.length || day.subject.length;
-      if (!hasEvents) return;
-      const scoreText = day.score === null ? 'ไม่มีข้อมูล' : `${day.score}% ${riskCategoryLabel(day.category)}`;
-      tbody.append(`<tr class="border-b border-gray-100"><td class="p-3 text-gray-700 text-sm">${riskEscapeHtml(day.date)}</td><td class="p-3 text-sm">${riskEventsText(day.attendance, 'attendance')}</td><td class="p-3 text-sm">${riskEventsText(day.cleaning, 'cleaning')}</td><td class="p-3 text-sm">${riskEventsText(day.subject, 'subject')}</td><td class="p-3 text-center text-xs">${riskEscapeHtml(scoreText)}</td></tr>`);
-    });
-    if (!tbody.children().length) tbody.append('<tr><td colspan="5" class="text-center p-5 text-gray-400">ไม่มีข้อมูลในช่วงวันที่นี้</td></tr>');
-  } catch (error) {
-    $('#risk-detail-tbody').html(`<tr><td colspan="5" class="text-center p-5 text-rose-600">${riskEscapeHtml(error.message)}</td></tr>`);
+function saveRiskSettings(tabId) {
+  const st = riskViewState[tabId];
+  if (!st) return;
+  const p = st.prefix;
+  const w = {
+    attendance: Number($('#' + p + '-w-att').val()) || 0,
+    cleaning: Number($('#' + p + '-w-cln').val()) || 0,
+    subject: Number($('#' + p + '-w-subj').val()) || 0
+  };
+  if (w.attendance + w.cleaning + w.subject <= 0) {
+    return Swal.fire('แจ้งเตือน', 'ผลรวมต้องมากกว่า 0', 'warning');
   }
+
+  $.LoadingOverlay('show');
+  google.script.run
+    .withSuccessHandler(function(res) {
+      $.LoadingOverlay('hide');
+      if (res.status === 'success') {
+        Object.keys(riskViewState).forEach(function(otherId) {
+          const other = riskViewState[otherId];
+          if (!other) return;
+          other.weights = w;
+          $('#' + otherId).find('.' + other.prefix + '-weights').text(riskWeightsText(w));
+        });
+        $('#' + p + '-settings-modal').hide();
+        Swal.fire({ icon: 'success', title: 'บันทึกแล้ว — ใช้ร่วมกันทั้ง 2 หน้า', timer: 1500, showConfirmButton: false });
+        if (st.lastData) loadRiskView(tabId);
+      } else {
+        Swal.fire('ผิดพลาด', res.message, 'error');
+      }
+    })
+    .withFailureHandler(function(error) {
+      $.LoadingOverlay('hide');
+      Swal.fire('ผิดพลาด', (error && error.message) || 'บันทึกค่าน้ำหนักไม่สำเร็จ', 'error');
+    })
+    .saveRiskWeights(JSON.stringify(w));
 }
 
-async function showRiskDaily(studentId, classroomId, date) {
-  $('#risk-daily-title').text(`📅 ${date}`);
-  $('#risk-daily-sub').text('กำลังโหลดรายละเอียด...');
-  $('#risk-daily-breakdown').html('<div class="text-center text-gray-400">กำลังโหลด...</div>');
-  $('#risk-daily-modal').css('display', 'flex');
-  try {
-    const data = await riskFetchStudentDetail(studentId, classroomId);
-    const student = data.student;
-    const day = data.days.find(function(item) { return item.date === date; });
-    if (!day) throw new Error('ไม่พบข้อมูลวันที่เลือก');
-    $('#risk-daily-sub').text(student.name);
-    const statusLine = function(title, events, kind) {
-      return `<div class="flex justify-between gap-3 items-start p-3 bg-gray-50 rounded-xl"><span class="font-bold shrink-0">${title}</span><span class="text-right text-sm">${riskEventsText(events, kind)}</span></div>`;
-    };
-    let html = statusLine('📝 เข้าแถว', day.attendance, 'attendance') + statusLine('🧹 เขตพื้นที่', day.cleaning, 'cleaning') + statusLine('📚 เข้าเรียน', day.subject, 'subject');
-    html += `<div class="p-3 rounded-xl mt-2 text-center ${day.category === 'red' ? 'bg-rose-100 text-rose-800' : day.category === 'yellow' ? 'bg-amber-100 text-amber-800' : day.category === 'green' ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-700'}"><div class="text-xs font-bold">คะแนนรวมวันนี้</div><div class="text-3xl font-extrabold">${day.score === null ? 'ไม่มีข้อมูล' : `${day.score}%`}</div></div>`;
-    $('#risk-daily-breakdown').html(html);
-  } catch (error) {
-    $('#risk-daily-sub').text('');
-    $('#risk-daily-breakdown').html(`<div class="text-center text-rose-600">${riskEscapeHtml(error.message)}</div>`);
-  }
-}
+// ===== Detail Modals =====
+function showRiskDetailFor(tabId, studentId) {
+  const st = riskViewState[tabId];
+  const stu = (st.lastData.students || []).find(s => s.id === studentId);
+  if (!stu) return;
 
-// ========================================
-// PHASE 3.6: Print Documents (print-only)
-// ========================================
+  $("#risk-detail-title").text(`👁️ ${stu.name}`);
+  $("#risk-detail-sub").text(`ห้อง ${stu.classroom_name} | Composite ${stu.composite}% | ${stu.category === 'red' ? '🔴 ใกล้ชิด' : stu.category === 'yellow' ? '🟡 ห่วงใย' : '🟢 ไว้ใจ'}`);
+  $("#risk-detail-modal").css('display', 'flex');
 
-let currentPrintTarget = null;
+  const b = stu.breakdown;
+  const card = (icon, label, bd, color) => {
+    if (!bd) return `<div class="p-3 rounded-xl bg-gray-100"><div class="text-xs font-bold text-gray-500">${icon} ${label}</div><div class="text-lg font-extrabold text-gray-400 mt-1">ไม่มีข้อมูล</div></div>`;
+    return `<div class="p-3 rounded-xl" style="background:${color.bg};"><div class="text-xs font-bold" style="color:${color.text};">${icon} ${label}</div><div class="text-2xl font-extrabold mt-1" style="color:${color.text};">${bd.score}%</div><div class="text-xs mt-1" style="color:${color.text};">${bd.points} / ${bd.total} ครั้ง</div></div>`;
+  };
+  $("#risk-detail-breakdown").html(
+    card('📝','เข้าแถว',b.attendance,{bg:'#dcfce7',text:'#166534'}) +
+    card('🧹','เขตพื้นที่',b.cleaning,{bg:'#dbeafe',text:'#1e40af'}) +
+    card('📚','เข้าเรียน',b.subject,{bg:'#f3e8ff',text:'#6b21a8'})
+  );
 
-function openPrintWarning(studentId, classroomId) {
-  showPrintConfig('warning', studentId, classroomId);
-}
-
-function openPrintActivity(studentId, classroomId) {
-  showPrintConfig('activity', studentId, classroomId);
-}
-
-async function showPrintConfig(type, studentId, classroomId) {
-  const students = riskState.lastData && Array.isArray(riskState.lastData.students) ? riskState.lastData.students : [];
-  const student = students.find(function(item) {
-    return String(item.id) === String(studentId) && (!classroomId || String(item.classroom_id) === String(classroomId));
+  const tbody = $("#risk-detail-tbody").empty();
+  const dates = Object.keys(stu.dailyScores).sort();
+  const catBadge = { green: 'bg-emerald-100 text-emerald-700', yellow: 'bg-amber-100 text-amber-700', red: 'bg-rose-100 text-rose-700' };
+  const cellStatus = (bd) => {
+    if (!bd) return '<span class="text-gray-300">—</span>';
+    const pct = (bd.points / bd.total) * 100;
+    const cls = pct >= 85 ? 'text-emerald-600' : pct >= 60 ? 'text-amber-600' : 'text-rose-600';
+    return `<span class="${cls} font-bold text-xs">${bd.points}/${bd.total}</span>`;
+  };
+  dates.forEach(d => {
+    const day = stu.dailyScores[d];
+    if (!day) { tbody.append(`<tr class="border-b border-gray-100"><td class="p-3 text-gray-500 text-sm">${d}</td><td colspan="4" class="p-3 text-center text-gray-400 text-xs">ไม่มีข้อมูล</td></tr>`); return; }
+    tbody.append(`
+      <tr class="border-b border-gray-100 hover:bg-blue-50">
+        <td class="p-3 text-gray-700 text-sm">${d}</td>
+        <td class="p-3 text-center">${cellStatus(day.breakdown.attendance)}</td>
+        <td class="p-3 text-center">${cellStatus(day.breakdown.cleaning)}</td>
+        <td class="p-3 text-center">${cellStatus(day.breakdown.subject)}</td>
+        <td class="p-3 text-center"><span class="px-2 py-1 rounded-lg text-xs font-bold ${catBadge[day.category]}">${day.score}%</span></td>
+      </tr>`);
   });
-  if (!student) {
-    Swal.fire('แจ้งเตือน', 'ไม่พบนักเรียนในผลการประเมินปัจจุบัน', 'warning');
-    return;
-  }
+}
+
+function showRiskDailyFor(tabId, studentId, studentName, date) {
+  const st = riskViewState[tabId];
+  const stu = (st.lastData.students || []).find(s => s.id === studentId);
+  if (!stu) return;
+  const day = stu.dailyScores[date];
+  if (!day) return;
+
+  $("#risk-daily-title").text(`📅 ${date}`);
+  $("#risk-daily-sub").text(studentName);
+  $("#risk-daily-modal").css('display', 'flex');
+
+  const statusOf = (bd) => {
+    if (!bd) return '<span class="text-gray-400">ไม่มีข้อมูล</span>';
+    const pct = (bd.points / bd.total) * 100;
+    const cls = pct >= 85 ? 'text-emerald-700' : pct >= 60 ? 'text-amber-700' : 'text-rose-700';
+    return `<span class="font-bold ${cls}">${pct.toFixed(0)}% (${bd.points}/${bd.total})</span>`;
+  };
+  $("#risk-daily-breakdown").html(`
+    <div class="flex justify-between items-center p-3 bg-gray-50 rounded-xl"><span class="font-bold">📝 เข้าแถว</span><span>${statusOf(day.breakdown.attendance)}</span></div>
+    <div class="flex justify-between items-center p-3 bg-gray-50 rounded-xl"><span class="font-bold">🧹 เขตพื้นที่</span><span>${statusOf(day.breakdown.cleaning)}</span></div>
+    <div class="flex justify-between items-center p-3 bg-gray-50 rounded-xl"><span class="font-bold">📚 เข้าเรียน</span><span>${statusOf(day.breakdown.subject)}</span></div>
+    <div class="p-3 rounded-xl mt-2 text-center" style="background:${day.category === 'red' ? '#fee2e2' : day.category === 'yellow' ? '#fef3c7' : '#dcfce7'};">
+      <div class="text-xs font-bold">คะแนนรวมวันนี้</div>
+      <div class="text-3xl font-extrabold">${day.score}%</div>
+    </div>
+  `);
+}
+
+// ===== Print Summary =====
+async function printRiskSummaryFor(tabId) {
+  const st = riskViewState[tabId];
+  if (!st || !st.lastData) return Swal.fire('แจ้งเตือน', 'กรุณาประเมินก่อน', 'warning');
+
+  const data = st.lastData;
+  const schoolName = (CONFIG && CONFIG.school_config && CONFIG.school_config.schoolName) || 'โรงเรียน';
+  const rangeText = `${st.mode === 'week' ? 'สัปดาห์' : 'เดือน'} ${formatThaiDate(data.period.startDate)} - ${formatThaiDate(data.period.endDate)}`;
+
+  const win = window.open('', '_blank');
+  if (!win) return Swal.fire('แจ้งเตือน', 'กรุณาอนุญาต Pop-up', 'warning');
+  win.document.write(buildSummaryReportHtml(data, schoolName, rangeText));
+  win.document.close();
+  await logGeneratedRiskDocumentFor(tabId, 'summary', '', '');
+}
+
+// ===== Print Warning / Activity (ผูกกับ tabId) =====
+let currentPrintCtx = null;
+function openPrintWarningFor(tabId, studentId) { openPrintConfigFor(tabId, studentId, 'warning'); }
+function openPrintActivityFor(tabId, studentId) { openPrintConfigFor(tabId, studentId, 'activity'); }
+
+async function openPrintConfigFor(tabId, studentId, type) {
+  const st = riskViewState[tabId];
+  const stu = st && st.lastData && Array.isArray(st.lastData.students)
+    ? st.lastData.students.find(s => String(s.id) === String(studentId)) : null;
+  if (!stu) return Swal.fire('แจ้งเตือน', 'ไม่พบนักเรียนในผลการประเมินปัจจุบัน', 'warning');
 
   let selectedType = type;
-  let history = { redCount: null, yellowCount: null, recommendation: 'none' };
+  let history = { redCount: null, recommendation: 'none' };
   let historyMessage = 'ยังไม่ได้โหลดประวัติกลุ่มสี';
   $.LoadingOverlay('show', { text: 'กำลังโหลดประวัติ 8 สัปดาห์...' });
   try {
-    const response = await runGoogleScript('getStudentRiskHistory', student.id, 8, student.classroom_id || classroomId || '');
+    const response = await runGoogleScript('getStudentRiskHistory', stu.id, 8, stu.classroom_id || '');
     if (response.status === 'success' && response.data) {
       history = response.data;
       if (history.recommendation === 'warning' || history.recommendation === 'activity') selectedType = history.recommendation;
@@ -2249,16 +1770,10 @@ async function showPrintConfig(type, studentId, classroomId) {
   } finally {
     $.LoadingOverlay('hide');
   }
-  currentPrintTarget = {
-    type: selectedType,
-    studentId: String(student.id),
-    classroomId: String(student.classroom_id || classroomId || ''),
-    history: history
-  };
-  $('#print-history-summary').text(historyMessage);
 
-  const schoolName = typeof CONFIG !== 'undefined' && CONFIG.school_config && CONFIG.school_config.schoolName
-    ? CONFIG.school_config.schoolName : 'โรงเรียน';
+  currentPrintCtx = { tabId, studentId: String(stu.id), type: selectedType, student: stu, history };
+  const schoolName = (CONFIG && CONFIG.school_config && CONFIG.school_config.schoolName) || 'โรงเรียน';
+  $('#print-history-summary').text(historyMessage);
   $('#print-school').val(schoolName);
   $('#print-doc-type').val(selectedType);
   $('#print-doc-no').val(`ศธ 04201/${new Date().getFullYear() + 543 + Math.floor(Math.random() * 1000)}`);
@@ -2280,54 +1795,83 @@ async function showPrintConfig(type, studentId, classroomId) {
   });
   $('#print-config-modal').css('display', 'flex');
   $('#print-config-confirm').off('click.print').on('click.print', async function() {
+    const ctx = currentPrintCtx;
+    if (!ctx) return;
     const docType = $('#print-doc-type').val();
     $('#print-config-modal').hide();
-    if (docType === 'warning') await printWarningLetter(student);
-    else await printBehaviorActivity(student);
+    if (docType === 'warning') await printWarningLetterFor(ctx.tabId, ctx.student);
+    else await printBehaviorActivityFor(ctx.tabId, ctx.student);
   });
 }
 
-async function printRiskSummary() {
-  if (!riskState.lastData) {
-    Swal.fire('แจ้งเตือน', 'กรุณาประเมินก่อน', 'warning');
-    return;
-  }
-  const data = riskState.lastData;
-  const schoolName = typeof CONFIG !== 'undefined' && CONFIG.school_config && CONFIG.school_config.schoolName
-    ? CONFIG.school_config.schoolName : 'โรงเรียน';
-  const period = data.period || {};
-  const rangeText = riskState.mode === 'week'
-    ? `สัปดาห์ ${formatThaiDate(period.startDate)} - ${formatThaiDate(period.endDate)}`
-    : `เดือน ${formatThaiDate(period.startDate)} - ${formatThaiDate(period.endDate)}`;
+async function printWarningLetterFor(tabId, stu) {
+  // Open synchronously from the confirmation click so browsers do not block the print window.
   const win = window.open('', '_blank');
-  if (!win) {
-    Swal.fire('แจ้งเตือน', 'กรุณาอนุญาต Pop-up เพื่อพิมพ์รายงาน', 'warning');
-    return;
+  if (!win) return Swal.fire('แจ้งเตือน', 'กรุณาอนุญาต Pop-up เพื่อพิมพ์หนังสือ', 'warning');
+  $.LoadingOverlay('show', { text: 'กำลังเตรียมเอกสาร...' });
+  try {
+    const hist = currentPrintCtx && currentPrintCtx.history ? currentPrintCtx.history : { redCount: null };
+    const docNo = $('#print-doc-no').val() || '............';
+    const school = $('#print-school').val() || 'โรงเรียน';
+    const director = $('#print-director').val() || '....................................';
+    const docDate = $('#print-doc-date').val() || new Date().toISOString().split('T')[0];
+    const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
+    const teacherName = teacher.name || '....................................';
+    const period = riskViewState[tabId].lastData.period;
+    const rangeText = `ตั้งแต่วันที่ ${formatThaiDate(period.startDate)} ถึง ${formatThaiDate(period.endDate)}`;
+    const b = stu.breakdown || {};
+    const detailLines = [];
+    if (b.attendance) detailLines.push(`การเข้าแถว: ${b.attendance.score}% (${b.attendance.points}/${b.attendance.total} ครั้ง)`);
+    if (b.cleaning) detailLines.push(`การทำเวรเขตพื้นที่: ${b.cleaning.score}% (${b.cleaning.points}/${b.cleaning.total} ครั้ง)`);
+    if (b.subject) detailLines.push(`การเข้าเรียน: ${b.subject.score}% (${b.subject.points}/${b.subject.total} ครั้ง)`);
+    const html = buildWarningLetterHtml({
+      school, docNo, docDate, director, teacherName, student: stu, rangeText, detailLines,
+      redCount: hist.redCount, composite: stu.composite, streak: stu.streak
+    });
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+    await logGeneratedRiskDocumentFor(tabId, 'warning', stu.id, docNo);
+  } catch (error) {
+    if (!win.closed) win.close();
+    Swal.fire('ผิดพลาด', error.message || 'เตรียมหนังสือไม่สำเร็จ', 'error');
+  } finally {
+    $.LoadingOverlay('hide');
   }
-  win.document.open();
-  win.document.write(buildSummaryReportHtml(data, schoolName, rangeText));
-  win.document.close();
-  await logGeneratedRiskDocument('summary', '', '');
 }
 
-async function logGeneratedRiskDocument(documentType, studentId, documentNo) {
-  const period = riskState.lastData && riskState.lastData.period ? riskState.lastData.period : {};
-  let actorName = '';
+async function printBehaviorActivityFor(tabId, stu) {
+  // Open synchronously from the confirmation click so browsers do not block the print window.
+  const win = window.open('', '_blank');
+  if (!win) return Swal.fire('แจ้งเตือน', 'กรุณาอนุญาต Pop-up เพื่อพิมพ์หนังสือ', 'warning');
+  $.LoadingOverlay('show', { text: 'กำลังเตรียมเอกสาร...' });
   try {
+    const hist = currentPrintCtx && currentPrintCtx.history ? currentPrintCtx.history : { redCount: null };
+    const docNo = $('#print-doc-no').val() || '............';
+    const school = $('#print-school').val() || 'โรงเรียน';
+    const director = $('#print-director').val() || '....................................';
+    const docDate = $('#print-doc-date').val() || new Date().toISOString().split('T')[0];
     const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
-    actorName = teacher.name || '';
+    const teacherName = teacher.name || '....................................';
+    const activities = [];
+    $('.print-act-check:checked').each(function() { activities.push($(this).val()); });
+    const actStart = $('#print-act-start').val() || '';
+    const actEnd = $('#print-act-end').val() || '';
+    const period = riskViewState[tabId].lastData.period;
+    const rangeText = `ตั้งแต่วันที่ ${formatThaiDate(period.startDate)} ถึง ${formatThaiDate(period.endDate)}`;
+    const html = buildBehaviorActivityHtml({
+      school, docNo, docDate, director, teacherName, student: stu, rangeText, activities, actStart, actEnd,
+      redCount: hist.redCount, composite: stu.composite, streak: stu.streak
+    });
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+    await logGeneratedRiskDocumentFor(tabId, 'activity', stu.id, docNo);
   } catch (error) {
-    console.warn('Could not read current app user name for document log:', error);
-  }
-  try {
-    const response = await runGoogleScript(
-      'logRiskDocumentGeneration', documentType, studentId || '',
-      period.startDate || '', period.endDate || '', documentNo || '', actorName
-    );
-    if (response.status !== 'success') throw new Error(response.message || 'บันทึกไม่สำเร็จ');
-  } catch (error) {
-    console.error('Document created, but its log entry could not be saved:', error);
-    Swal.fire('แจ้งเตือน', `สร้างเอกสารแล้ว แต่บันทึกประวัติการสร้างเอกสารไม่สำเร็จ: ${error.message || 'เกิดข้อผิดพลาด'}`, 'warning');
+    if (!win.closed) win.close();
+    Swal.fire('ผิดพลาด', error.message || 'เตรียมหนังสือไม่สำเร็จ', 'error');
+  } finally {
+    $.LoadingOverlay('hide');
   }
 }
 
@@ -2372,46 +1916,6 @@ function buildSummaryReportHtml(data, schoolName, rangeText) {
 <table><thead><tr><th>#</th><th>ห้อง</th><th>รหัส</th><th>ชื่อ-สกุล</th><th>เข้าแถว</th><th>เขตพื้นที่</th><th>เข้าเรียน</th><th>รวม</th><th>Streak</th><th>กลุ่ม</th></tr></thead><tbody>${rows}</tbody></table>
 <div style="margin-top:30px;text-align:right;font-size:12pt"><div>ลงชื่อ ........................................................ ครูผู้รายงาน</div><div style="margin-top:6px">( ........................................................ )</div></div>
 </body></html>`;
-}
-
-async function printWarningLetter(student) {
-  // Open the print window synchronously from the click gesture to avoid popup blockers.
-  const win = window.open('', '_blank');
-  if (!win) {
-    Swal.fire('แจ้งเตือน', 'กรุณาอนุญาต Pop-up เพื่อพิมพ์หนังสือ', 'warning');
-    return;
-  }
-  $.LoadingOverlay('show', { text: 'กำลังเตรียมเอกสาร...' });
-  try {
-    const history = currentPrintTarget && currentPrintTarget.history ? currentPrintTarget.history : { redCount: null, weeks: [] };
-    const docNo = $('#print-doc-no').val() || '............';
-    const school = $('#print-school').val() || 'โรงเรียน';
-    const director = $('#print-director').val() || '....................................';
-    const docDate = $('#print-doc-date').val() || new Date().toISOString().split('T')[0];
-    const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
-    const teacherName = teacher.name || '....................................';
-    const period = riskState.lastData.period;
-    const rangeText = `ตั้งแต่วันที่ ${formatThaiDate(period.startDate)} ถึง ${formatThaiDate(period.endDate)}`;
-    const breakdown = student.breakdown || {};
-    const detailLines = [];
-    if (breakdown.attendance) detailLines.push(`การเข้าแถว: ${breakdown.attendance.score}% (${breakdown.attendance.points}/${breakdown.attendance.total} ครั้ง)`);
-    if (breakdown.cleaning) detailLines.push(`การทำเวรเขตพื้นที่: ${breakdown.cleaning.score}% (${breakdown.cleaning.points}/${breakdown.cleaning.total} ครั้ง)`);
-    if (breakdown.subject) detailLines.push(`การเข้าเรียน: ${breakdown.subject.score}% (${breakdown.subject.points}/${breakdown.subject.total} ครั้ง)`);
-    const html = buildWarningLetterHtml({
-      school: school, docNo: docNo, docDate: docDate, director: director, teacherName: teacherName,
-      student: student, rangeText: rangeText, detailLines: detailLines,
-      redCount: history.redCount, composite: student.composite, streak: student.streak
-    });
-    win.document.open();
-    win.document.write(html);
-    win.document.close();
-    await logGeneratedRiskDocument('warning', student.id, $('#print-doc-no').val());
-  } catch (error) {
-    if (!win.closed) win.close();
-    Swal.fire('ผิดพลาด', error.message || 'เตรียมหนังสือไม่สำเร็จ', 'error');
-  } finally {
-    $.LoadingOverlay('hide');
-  }
 }
 
 function buildWarningLetterHtml(options) {
@@ -2473,45 +1977,6 @@ function buildWarningLetterHtml(options) {
   <div class="indent">ข้าพเจ้า ..................................................... ผู้ปกครองของ ${studentName} ได้รับหนังสือแจ้งเตือนดังกล่าวแล้ว และจะให้ความร่วมมือในการดูแล ติดตาม และให้กำลังใจนักเรียนในการเข้าเรียนและร่วมกิจกรรมอย่างสม่ำเสมอ</div>
   <div style="text-align:right;margin-top:30px"><div>ลงชื่อ ..................................................... ผู้ปกครอง</div><div style="margin-top:6px">( ..................................................... )</div><div style="margin-top:6px">วันที่ ......... / ......... / .........</div></div>
 </div></body></html>`;
-}
-
-async function printBehaviorActivity(student) {
-  // Open the print window synchronously from the click gesture to avoid popup blockers.
-  const win = window.open('', '_blank');
-  if (!win) {
-    Swal.fire('แจ้งเตือน', 'กรุณาอนุญาต Pop-up เพื่อพิมพ์หนังสือ', 'warning');
-    return;
-  }
-  $.LoadingOverlay('show', { text: 'กำลังเตรียมเอกสาร...' });
-  try {
-    const history = currentPrintTarget && currentPrintTarget.history ? currentPrintTarget.history : { redCount: null };
-    const docNo = $('#print-doc-no').val() || '............';
-    const school = $('#print-school').val() || 'โรงเรียน';
-    const director = $('#print-director').val() || '....................................';
-    const docDate = $('#print-doc-date').val() || new Date().toISOString().split('T')[0];
-    const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
-    const teacherName = teacher.name || '....................................';
-    const activities = $('.print-act-check:checked').map(function() { return $(this).val(); }).get();
-    const actStart = $('#print-act-start').val() || '';
-    const actEnd = $('#print-act-end').val() || '';
-    const period = riskState.lastData.period;
-    const rangeText = `ตั้งแต่วันที่ ${formatThaiDate(period.startDate)} ถึง ${formatThaiDate(period.endDate)}`;
-    const html = buildBehaviorActivityHtml({
-      school: school, docNo: docNo, docDate: docDate, director: director, teacherName: teacherName,
-      student: student, rangeText: rangeText, activities: activities,
-      actStart: actStart, actEnd: actEnd, redCount: history.redCount,
-      composite: student.composite, streak: student.streak
-    });
-    win.document.open();
-    win.document.write(html);
-    win.document.close();
-    await logGeneratedRiskDocument('activity', student.id, $('#print-doc-no').val());
-  } catch (error) {
-    if (!win.closed) win.close();
-    Swal.fire('ผิดพลาด', error.message || 'เตรียมหนังสือไม่สำเร็จ', 'error');
-  } finally {
-    $.LoadingOverlay('hide');
-  }
 }
 
 function buildBehaviorActivityHtml(options) {
