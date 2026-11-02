@@ -1572,45 +1572,140 @@ function saveSubjectAttendance(jsonPayload) {
   }
 }
 
-// ฟังก์ชันสรุปการเข้าเรียน (ปรับปรุงให้รองรับวิชาที่ไม่มีรหัสวิชา)
-function getSubjectAttendanceSummary(teacherIdentifier, subjectKey) {
-  var ss = getSpreadsheet();
-  var sheet = ss.getSheetByName("Attendance_Subjects");
-  if (!sheet) return { status: "error", message: "ยังไม่มีข้อมูล" };
-  
-  var data = sheet.getDataRange().getValues();
-  var summary = {}; 
-  
-  for (var i = 1; i < data.length; i++) {
-    var row = data[i];
-    var rowSubjCode = String(row[2]).trim();
-    var rowSubjName = String(row[3]).trim();
-    var rowTeacher = String(row[4]).trim();
-    
-    // ตรวจสอบวิชา (เช็คจากรหัสวิชาก่อน ถ้าไม่มีรหัสให้เช็คจากชื่อวิชา)
-    var matchSubject = false;
-    if (rowSubjCode !== "") {
-      matchSubject = (rowSubjCode === subjectKey);
-    } else {
-      matchSubject = (rowSubjName === subjectKey);
+// ========================================
+// SUBJECT SUMMARY V2 — Date Range + Charts + Student Detail
+// ========================================
+
+/** สรุปสถิติรายวิชา รองรับช่วงวันที่และตัวกรองห้อง */
+function getSubjectAttendanceSummaryV2(teacherIdentifier, subjectKey, startDate, endDate, classroomFilter) {
+  try {
+    const emptyTotals = { present: 0, absent: 0, leave: 0, late: 0, sick: 0, total: 0 };
+    const sheet = getSpreadsheet().getSheetByName("Attendance_Subjects");
+    if (!sheet) {
+      return { status: "success", data: { students: [], totals: emptyTotals, dailyTrend: {} } };
     }
-    
-    if (matchSubject && rowTeacher.toLowerCase() === String(teacherIdentifier).toLowerCase()) {
-      var stuId = String(row[7]).trim();
-      if (!summary[stuId]) {
-        summary[stuId] = { id: stuId, name: String(row[8]).trim(), present: 0, absent: 0, leave: 0, late: 0, total: 0 };
+
+    const data = sheet.getDataRange().getValues();
+    const summary = {};
+    const dailyTrend = {};
+    const normTeacher = String(teacherIdentifier || "").trim().toLowerCase();
+    const subjKey = String(subjectKey || "").trim();
+
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const rowDate = formatDateStr(row[1]);
+      const rowCode = String(row[2] || "").trim();
+      const rowName = String(row[3] || "").trim();
+      const rowTeacher = String(row[4] || "").trim().toLowerCase();
+      const rowGrade = String(row[5] || "").trim();
+      const rowRoom = String(row[6] || "").trim();
+      const studentId = String(row[7] || "").trim();
+      const studentName = String(row[8] || "").trim();
+      const status = String(row[9] || "").trim();
+
+      if (!rowDate || !studentId || rowTeacher !== normTeacher) continue;
+      if (startDate && rowDate < startDate) continue;
+      if (endDate && rowDate > endDate) continue;
+
+      // The subject list uses its code as key, or the name when no code exists.
+      const rowSubjectKey = rowCode || rowName;
+      const matchesSubject = rowSubjectKey === subjKey;
+      if (!matchesSubject) continue;
+
+      if (classroomFilter) {
+        const gradeRoom = rowGrade + "/" + rowRoom;
+        if (gradeRoom !== classroomFilter && rowRoom !== classroomFilter && rowGrade !== classroomFilter) continue;
       }
-      var status = String(row[9]).trim();
-      if (status === "มา") summary[stuId].present++;
-      else if (status === "ขาด") summary[stuId].absent++;
-      else if (status === "ลา") summary[stuId].leave++;
-      else if (status === "สาย") summary[stuId].late++;
-      summary[stuId].total++;
+
+      if (!summary[studentId]) {
+        summary[studentId] = {
+          id: studentId, name: studentName, gradeLevel: rowGrade, room: rowRoom,
+          present: 0, absent: 0, leave: 0, late: 0, sick: 0, total: 0
+        };
+      }
+      const student = summary[studentId];
+      if (status === "มา") student.present++;
+      else if (status === "ขาด") student.absent++;
+      else if (status === "ลา") student.leave++;
+      else if (status === "สาย") student.late++;
+      else if (status === "ป่วย") student.sick++;
+      student.total++;
+
+      if (!dailyTrend[rowDate]) {
+        dailyTrend[rowDate] = { present: 0, absent: 0, leave: 0, late: 0, sick: 0 };
+      }
+      if (status === "มา") dailyTrend[rowDate].present++;
+      else if (status === "ขาด") dailyTrend[rowDate].absent++;
+      else if (status === "ลา") dailyTrend[rowDate].leave++;
+      else if (status === "สาย") dailyTrend[rowDate].late++;
+      else if (status === "ป่วย") dailyTrend[rowDate].sick++;
     }
+
+    const students = Object.values(summary);
+    students.sort((a, b) => {
+      const roomA = a.gradeLevel + "/" + a.room;
+      const roomB = b.gradeLevel + "/" + b.room;
+      return roomA.localeCompare(roomB, "th") || a.id.localeCompare(b.id);
+    });
+
+    const totals = { present: 0, absent: 0, leave: 0, late: 0, sick: 0, total: 0 };
+    students.forEach(student => {
+      totals.present += student.present;
+      totals.absent += student.absent;
+      totals.leave += student.leave;
+      totals.late += student.late;
+      totals.sick += student.sick;
+      totals.total += student.total;
+    });
+
+    return { status: "success", data: { students, totals, dailyTrend } };
+  } catch (err) {
+    Logger.log("Error in getSubjectAttendanceSummaryV2: " + err.message);
+    return { status: "error", message: err.toString() };
   }
-  var resultArray = Object.keys(summary).map(function(key) { return summary[key]; });
-  resultArray.sort(function(a, b) { return a.id.localeCompare(b.id); });
-  return { status: "success", data: resultArray };
+}
+
+/** รายละเอียดรายวันของนักเรียนหนึ่งคน สำหรับ modal */
+function getSubjectStudentDetail(teacherIdentifier, subjectKey, studentId, startDate, endDate) {
+  try {
+    const sheet = getSpreadsheet().getSheetByName("Attendance_Subjects");
+    if (!sheet) return { status: "success", data: [] };
+
+    const data = sheet.getDataRange().getValues();
+    const result = [];
+    const normTeacher = String(teacherIdentifier || "").trim().toLowerCase();
+    const subjKey = String(subjectKey || "").trim();
+    const targetStudent = String(studentId || "").trim();
+
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const rowDate = formatDateStr(row[1]);
+      const rowCode = String(row[2] || "").trim();
+      const rowName = String(row[3] || "").trim();
+      const rowTeacher = String(row[4] || "").trim().toLowerCase();
+      const rowStudent = String(row[7] || "").trim();
+
+      if (!rowDate || rowStudent !== targetStudent || rowTeacher !== normTeacher) continue;
+      if (startDate && rowDate < startDate) continue;
+      if (endDate && rowDate > endDate) continue;
+
+      const rowSubjectKey = rowCode || rowName;
+      const matchesSubject = rowSubjectKey === subjKey;
+      if (!matchesSubject) continue;
+
+      result.push({
+        date: rowDate,
+        status: String(row[9] || "").trim(),
+        note: String(row[10] || "").trim()
+      });
+    }
+
+    result.sort((a, b) => b.date.localeCompare(a.date));
+    return { status: "success", data: result };
+  } catch (err) {
+    Logger.log("Error in getSubjectStudentDetail: " + err.message);
+    return { status: "error", message: err.toString(), data: [] };
+  }
 }
 
 // ฟังก์ชันดึงรายชื่อวิชาทั้งหมดที่ครูสอน (ปรับรูปแบบข้อความตามเงื่อนไขใหม่)

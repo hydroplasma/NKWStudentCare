@@ -962,6 +962,8 @@
                         loadCleaningTable(date);
                     } else if (tabId === "cleaning-summary") {
                         loadCleaningSummary();
+                    } else if (tabId === "subject-summary") {
+                        initSubjectSummary();
                     } else if (tabId === "classroom-summary") {
                         loadClassroomSummary();
                     } else if (tabId === "overall-summary") {
@@ -1172,72 +1174,6 @@ function openSubjectAttendanceModal() {
     })
     .getScriptUrl(); // ฟังก์ชันนี้มีอยู่แล้วใน Code.gs
 }
-// โหลดรายวิชาสำหรับหน้า "สรุปรายวิชา" เมื่อคลิกแท็บ
-$('.nav-tab[data-tab="subject-summary"]').click(function() {
-  const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
-  const teacherIdentifier = teacher.username || teacher.name || teacher.email || "";
-  if (!teacherIdentifier) return;
-
-  $('#summary-subject-select').html('<option value="">-- กำลังโหลดรายวิชา... --</option>');
-
-  google.script.run.withSuccessHandler(function(res) {
-    const select = $('#summary-subject-select');
-    select.empty();
-    if (res.status === 'success' && res.data.length > 0) {
-      select.append('<option value="">-- เลือกรายวิชาที่ต้องการดูสถิติ --</option>');
-      res.data.forEach(subj => {
-        // ✅ ใช้ displayName ที่ server เตรียมไว้แล้ว (ปลอดภัยกว่า)
-        select.append(`<option value="${subj.key}">${subj.displayName}</option>`);
-      });
-    } else {
-      select.append('<option value="">ไม่พบรายวิชาที่คุณสอนในระบบ</option>');
-    }
-  }).getTeacherSubjectsList(teacherIdentifier);
-});
-
-  // เมื่อเลือกวิชา ให้ดึงข้อมูลสถิติรายบุคคลมาแสดง
-  $('#summary-subject-select').change(function() {
-    const subjectCode = $(this).val();
-    if (!subjectCode) {
-      $('#subject-summary-container').addClass('hidden');
-      return;
-    }
-
-    const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
-    const teacherIdentifier = teacher.username || teacher.name || teacher.email || "";
-
-    Swal.fire({ title: 'กำลังคำนวณสถิติ...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-
-    google.script.run.withSuccessHandler(function(res) {
-      Swal.close();
-      const tbody = $('#subject-summary-tbody');
-      tbody.empty();
-
-      if (res.status === 'success' && res.data.length > 0) {
-        $('#summary-subject-title').text(`📊 สถิติการเข้าเรียนวิชา ${subjectCode}`);
-        
-        res.data.forEach(stu => {
-          tbody.append(`
-            <tr class="border-b border-gray-100 hover:bg-gray-50 transition">
-              <td class="p-3 text-center text-gray-600 font-medium">${stu.id}</td>
-              <td class="p-3 text-gray-800 font-medium">${stu.name}</td>
-              <td class="p-3 text-center font-bold text-emerald-600">${stu.present}</td>
-              <td class="p-3 text-center font-bold text-rose-600">${stu.absent}</td>
-              <td class="p-3 text-center font-bold text-amber-600">${stu.leave}</td>
-              <td class="p-3 text-center font-bold text-blue-600">${stu.late}</td>
-              <td class="p-3 text-center font-bold text-gray-800 bg-gray-100 rounded-r-lg">${stu.total}</td>
-            </tr>
-          `);
-        });
-        $('#subject-summary-container').removeClass('hidden');
-      } else {
-        Swal.fire('ไม่พบข้อมูล', 'ยังไม่มีการบันทึกผลการเข้าเรียนในวิชานี้', 'info');
-        $('#subject-summary-container').addClass('hidden');
-      }
-    }).getSubjectAttendanceSummary(teacherIdentifier, subjectCode);
-  });
-
-
 // CLEANING TAB — Phase 1
 // ========================================
 

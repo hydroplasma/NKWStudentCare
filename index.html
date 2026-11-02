@@ -472,6 +472,14 @@
           </div>
         </div>
 
+        <!-- Cleaning Charts -->
+        <div class="app-card p-5 mb-5">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div class="bg-gray-50 p-4 rounded-2xl h-80"><canvas id="clean-pie-chart"></canvas></div>
+            <div class="bg-gray-50 p-4 rounded-2xl h-80"><canvas id="clean-bar-chart"></canvas></div>
+          </div>
+        </div>
+
         <div class="app-card p-5 mb-5">
           <h3 class="text-lg font-bold text-gray-800 mb-3">🏆 Top 5 นักเรียนขยัน</h3>
           <div class="table-responsive">
@@ -507,39 +515,96 @@
       </div>
     </div>
 
-    <!-- 📈 Tab เนื้อหา: สรุปการเข้าเรียนรายวิชา -->
+    <!-- ===== Subject Summary V2 ===== -->
     <div id="subject-summary" class="tab-content hidden">
       <div class="app-card p-5 mb-5">
-        <div class="grid grid-cols-1 gap-4 items-end">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label class="block text-gray-500 text-sm font-bold mb-1 ml-1">📚 เลือกรายวิชาเพื่อดูสถิติ</label>
+            <label class="block text-gray-500 text-sm font-bold mb-1">📚 วิชา</label>
             <select id="summary-subject-select" class="w-full">
-              <option value="">-- กำลังโหลดรายวิชา... --</option>
+              <option value="">-- กำลังโหลด --</option>
             </select>
           </div>
+          <div>
+            <label class="block text-gray-500 text-sm font-bold mb-1">📅 จาก</label>
+            <input type="text" id="summary-subject-start" class="w-full">
+          </div>
+          <div>
+            <label class="block text-gray-500 text-sm font-bold mb-1">📅 ถึง</label>
+            <input type="text" id="summary-subject-end" class="w-full">
+          </div>
+        </div>
+        <div class="mt-4 flex justify-end">
+          <button id="summary-subject-run" class="px-6 py-3 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-2xl font-bold shadow-lg shadow-blue-500/20 active:scale-95 transition">
+            🔍 ประมวลผล
+          </button>
         </div>
       </div>
 
-      <!-- ตารางสรุปสถิติ -->
-      <div id="subject-summary-container" class="app-card p-5 hidden">
-        <h3 id="summary-subject-title" class="text-xl font-bold text-gray-800 mb-4 text-center">สถิติการเข้าเรียน</h3>
-        <div class="table-responsive shadow-sm mb-6">
-          <table class="min-w-full bg-white border border-gray-100 rounded-2xl overflow-hidden text-sm">
-            <thead>
-              <tr class="bg-gray-800 text-white">
-                <th class="p-3 text-center">รหัส/เลขที่</th>
-                <th class="p-3 text-left">ชื่อ-สกุล</th>
-                <th class="p-3 text-center text-emerald-400">มา</th>
-                <th class="p-3 text-center text-rose-400">ขาด</th>
-                <th class="p-3 text-center text-blue-200">ลา</th>
-                <th class="p-3 text-center text-blue-400">สาย</th>
-                <th class="p-3 text-center">รวม (ครั้ง)</th>
-              </tr>
-            </thead>
-            <tbody id="subject-summary-tbody">
-              <!-- ข้อมูลสถิติจะถูกเพิ่มที่นี่ -->
-            </tbody>
-          </table>
+      <div id="subject-summary-empty" class="app-card p-5 text-center py-12 text-gray-400">
+        เลือกวิชา + ช่วงวันที่ แล้วกดประมวลผล
+      </div>
+
+      <div id="subject-summary-content" class="hidden">
+        <div class="app-card p-5 mb-5">
+          <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div class="p-4 text-center rounded-2xl" style="background:#dcfce7;">
+              <div class="text-xs font-bold text-emerald-800">✓ มา</div>
+              <div id="subj-card-present" class="text-2xl font-extrabold text-emerald-700 mt-1">0</div>
+              <div id="subj-card-present-pct" class="text-xs text-emerald-600">0%</div>
+            </div>
+            <div class="p-4 text-center rounded-2xl" style="background:#fee2e2;">
+              <div class="text-xs font-bold text-rose-800">✗ ขาด</div>
+              <div id="subj-card-absent" class="text-2xl font-extrabold text-rose-700 mt-1">0</div>
+              <div id="subj-card-absent-pct" class="text-xs text-rose-600">0%</div>
+            </div>
+            <div class="p-4 text-center rounded-2xl" style="background:#fef3c7;">
+              <div class="text-xs font-bold text-amber-800">⏰ สาย</div>
+              <div id="subj-card-late" class="text-2xl font-extrabold text-amber-700 mt-1">0</div>
+              <div id="subj-card-late-pct" class="text-xs text-amber-600">0%</div>
+            </div>
+            <div class="p-4 text-center rounded-2xl" style="background:#dbeafe;">
+              <div class="text-xs font-bold text-blue-800">📝 ลา</div>
+              <div id="subj-card-leave" class="text-2xl font-extrabold text-blue-700 mt-1">0</div>
+              <div id="subj-card-leave-pct" class="text-xs text-blue-600">0%</div>
+            </div>
+            <div class="p-4 text-center rounded-2xl" style="background:#f3e8ff;">
+              <div class="text-xs font-bold text-purple-800">🤒 ป่วย</div>
+              <div id="subj-card-sick" class="text-2xl font-extrabold text-purple-700 mt-1">0</div>
+              <div id="subj-card-sick-pct" class="text-xs text-purple-600">0%</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="app-card p-5 mb-5">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div class="bg-gray-50 p-4 rounded-2xl h-80"><canvas id="subject-pie-chart"></canvas></div>
+            <div class="bg-gray-50 p-4 rounded-2xl h-80"><canvas id="subject-bar-chart"></canvas></div>
+          </div>
+        </div>
+
+        <div class="app-card p-5">
+          <h3 id="subject-summary-title" class="text-lg font-bold text-gray-800 mb-3"></h3>
+          <div class="table-responsive">
+            <table class="min-w-full">
+              <thead>
+                <tr class="bg-blue-700 text-white">
+                  <th class="p-3 text-center">ห้อง</th>
+                  <th class="p-3 text-center">รหัส</th>
+                  <th class="p-3 text-left">ชื่อ-สกุล</th>
+                  <th class="p-3 text-center text-emerald-200">มา</th>
+                  <th class="p-3 text-center text-rose-200">ขาด</th>
+                  <th class="p-3 text-center text-amber-200">สาย</th>
+                  <th class="p-3 text-center text-blue-200">ลา</th>
+                  <th class="p-3 text-center text-purple-200">ป่วย</th>
+                  <th class="p-3 text-center">รวม</th>
+                  <th class="p-3 text-center">%</th>
+                  <th class="p-3 text-center">ดู</th>
+                </tr>
+              </thead>
+              <tbody id="subject-summary-tbody"></tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
@@ -646,6 +711,31 @@
         </table>
       </div>
       <div class="p-4 flex justify-end"><button id="save-modal-attendance" class="btn-save">💾 บันทึก</button></div>
+    </div>
+  </div>
+
+  <!-- Student Detail Modal -->
+  <div id="student-detail-modal" class="fixed inset-0 z-50 items-center justify-center bg-black/50 backdrop-blur-sm p-4" style="display:none;">
+    <div class="app-card w-full max-w-2xl max-h-[85vh] flex flex-col bg-white rounded-3xl overflow-hidden">
+      <div class="flex justify-between items-center p-5 bg-gradient-to-r from-blue-800 to-indigo-900 text-white">
+        <div>
+          <h2 id="student-detail-title" class="text-lg font-bold"></h2>
+          <p id="student-detail-sub" class="text-xs text-blue-200"></p>
+        </div>
+        <button type="button" onclick="$('#student-detail-modal').hide()" class="text-white text-2xl font-bold hover:opacity-75">×</button>
+      </div>
+      <div class="p-4 overflow-y-auto flex-grow">
+        <table class="min-w-full text-sm">
+          <thead>
+            <tr class="bg-slate-800 text-white">
+              <th class="p-3 text-left">วันที่</th>
+              <th class="p-3 text-center">สถานะ</th>
+              <th class="p-3 text-left">หมายเหตุ</th>
+            </tr>
+          </thead>
+          <tbody id="student-detail-tbody"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 

@@ -983,6 +983,303 @@ function renderCleaningSummary(data) {
       `);
     });
   }
+
+  renderCleaningCharts(data.studentStats || [], data.scoreDetails || []);
+}
+
+// ========================================
+// CLEANING CHARTS (Phase 2)
+// ========================================
+
+function renderCleaningCharts(studentStats, scoreDetails) {
+  let done = 0;
+  let notDone = 0;
+  let escaped = 0;
+  (studentStats || []).forEach(student => {
+    done += Number(student.done) || 0;
+    notDone += Number(student.not_done) || 0;
+    escaped += Number(student.escaped) || 0;
+  });
+
+  const pieCanvas = document.getElementById('clean-pie-chart');
+  if (pieCanvas) {
+    if (window.cleanPieChart) window.cleanPieChart.destroy();
+    window.cleanPieChart = new Chart(pieCanvas.getContext('2d'), {
+      type: 'pie',
+      data: {
+        labels: ['ทำ', 'ไม่ทำ', 'หนีเวร'],
+        datasets: [{ data: [done, notDone, escaped], backgroundColor: ['#10b981', '#f97316', '#ef4444'] }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'right' }, title: { display: true, text: 'สัดส่วนการทำเวร' } }
+      }
+    });
+  }
+
+  const roomBuckets = {};
+  (scoreDetails || []).forEach(detail => {
+    const [score, maxScore] = String(detail.total_score).split('/').map(Number);
+    if (!Number.isFinite(score) || !Number.isFinite(maxScore) || maxScore <= 0) return;
+    const roomId = String(detail.classroom_id || '');
+    if (!roomBuckets[roomId]) roomBuckets[roomId] = [];
+    roomBuckets[roomId].push((score / maxScore) * 100);
+  });
+
+  const roomLabels = [];
+  const roomValues = [];
+  Object.keys(roomBuckets).sort().forEach(roomId => {
+    const scores = roomBuckets[roomId];
+    const average = scores.reduce((sum, score) => sum + score, 0) / scores.length;
+    const classroom = (ALL_CLASSROOMS || []).find(item => String(item.id) === roomId);
+    roomLabels.push(classroom ? classroom.name : roomId);
+    roomValues.push(Number(average.toFixed(1)));
+  });
+
+  const barCanvas = document.getElementById('clean-bar-chart');
+  if (barCanvas) {
+    if (window.cleanBarChart) window.cleanBarChart.destroy();
+    window.cleanBarChart = new Chart(barCanvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: roomLabels,
+        datasets: [{ label: 'คะแนนเฉลี่ย (%)', data: roomValues, backgroundColor: '#2563eb' }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, title: { display: true, text: 'คะแนนเฉลี่ยแต่ละห้อง' } },
+        scales: { y: { beginAtZero: true, max: 100 } }
+      }
+    });
+  }
+}
+
+// ========================================
+// SUBJECT SUMMARY V2 — Phase 2
+// ========================================
+
+let currentSubjectCtx = null;
+
+function escapeSummaryHtml(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[char]));
+}
+
+function initSubjectSummary() {
+  const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
+  const teacherId = teacher.username || teacher.name || teacher.email || '';
+  if (!teacherId) return;
+
+  const today = TODAY;
+  const [year, month] = today.split('-').map(Number);
+  const start = `${year}-${String(month).padStart(2, '0')}-01`;
+  if (!document.getElementById('summary-subject-start')._flatpickr) {
+    flatpickr('#summary-subject-start', { dateFormat: 'Y-m-d', locale: 'th', defaultDate: start });
+    flatpickr('#summary-subject-end', { dateFormat: 'Y-m-d', locale: 'th', defaultDate: today });
+  }
+
+  const select = $('#summary-subject-select');
+  select.empty().append($('<option>').val('').text('-- กำลังโหลด --'));
+  google.script.run
+    .withSuccessHandler(function (res) {
+      select.empty().append($('<option>').val('').text('-- เลือกวิชา --'));
+      if (res && res.status === 'success' && Array.isArray(res.data) && res.data.length) {
+        res.data.forEach(subject => {
+          select.append($('<option>').val(subject.key).text(subject.displayName));
+        });
+      } else {
+        select.append($('<option>').val('').text('ไม่พบรายวิชา'));
+      }
+    })
+    .withFailureHandler(function (error) {
+      select.empty().append($('<option>').val('').text('โหลดรายวิชาไม่สำเร็จ'));
+      console.error('Error loading subjects:', error);
+    })
+    .getTeacherSubjectsList(teacherId);
+
+  $('#summary-subject-run').off('click').on('click', runSubjectSummaryV2);
+}
+
+async function runSubjectSummaryV2() {
+  const subjectKey = $('#summary-subject-select').val();
+  const startDate = $('#summary-subject-start').val();
+  const endDate = $('#summary-subject-end').val();
+  if (!subjectKey) return Swal.fire('แจ้งเตือน', 'กรุณาเลือกวิชา', 'warning');
+  if (!startDate || !endDate) return Swal.fire('แจ้งเตือน', 'กรุณาเลือกช่วงวันที่', 'warning');
+  if (startDate > endDate) return Swal.fire('แจ้งเตือน', 'วันที่เริ่มต้นต้องไม่เกินวันที่สิ้นสุด', 'warning');
+
+  const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
+  const teacherId = teacher.username || teacher.name || teacher.email || '';
+  $.LoadingOverlay('show', { text: 'กำลังประมวลผล...' });
+  try {
+    const response = await runGoogleScript('getSubjectAttendanceSummaryV2', teacherId, subjectKey, startDate, endDate, null);
+    if (!response || response.status !== 'success') throw new Error((response && response.message) || 'ไม่สามารถโหลดข้อมูลได้');
+    renderSubjectSummaryV2(subjectKey, response.data || {}, startDate, endDate);
+    $('#subject-summary-empty').addClass('hidden');
+    $('#subject-summary-content').removeClass('hidden');
+  } catch (error) {
+    Swal.fire('ผิดพลาด', error.message || String(error), 'error');
+  } finally {
+    $.LoadingOverlay('hide');
+  }
+}
+
+function renderSubjectSummaryV2(subjectKey, data, startDate, endDate) {
+  const totals = data.totals || { present: 0, absent: 0, leave: 0, late: 0, sick: 0, total: 0 };
+  const students = Array.isArray(data.students) ? data.students : [];
+  const total = Number(totals.total) || 0;
+  const percent = value => (total ? ((Number(value) || 0) / total * 100).toFixed(1) : '0.0') + '%';
+
+  $('#subj-card-present').text(totals.present || 0);
+  $('#subj-card-present-pct').text(percent(totals.present));
+  $('#subj-card-absent').text(totals.absent || 0);
+  $('#subj-card-absent-pct').text(percent(totals.absent));
+  $('#subj-card-late').text(totals.late || 0);
+  $('#subj-card-late-pct').text(percent(totals.late));
+  $('#subj-card-leave').text(totals.leave || 0);
+  $('#subj-card-leave-pct').text(percent(totals.leave));
+  $('#subj-card-sick').text(totals.sick || 0);
+  $('#subj-card-sick-pct').text(percent(totals.sick));
+
+  renderSubjectCharts(totals, data.dailyTrend || {});
+  $('#subject-summary-title').text(`📋 สรุปรายบุคคล — ${students.length} คน (รวม ${total} ครั้ง)`);
+  const tbody = $('#subject-summary-tbody').empty();
+
+  if (!students.length) {
+    tbody.append('<tr><td colspan="11" class="text-center p-6 text-gray-400">ไม่พบข้อมูล</td></tr>');
+  } else {
+    students.forEach(student => {
+      const attendancePct = Number(student.total) > 0 ? ((Number(student.present) / Number(student.total)) * 100).toFixed(0) : '0';
+      const gradeRoom = String(student.gradeLevel || '') + (student.room ? '/' + student.room : '');
+      const percentColor = attendancePct >= 80 ? 'text-emerald-600' : attendancePct >= 50 ? 'text-amber-600' : 'text-rose-600';
+      tbody.append(`
+        <tr class="border-b border-gray-100 hover:bg-blue-50">
+          <td class="p-3 text-center text-gray-600 text-sm">${escapeSummaryHtml(gradeRoom)}</td>
+          <td class="p-3 text-center text-gray-600 text-sm">${escapeSummaryHtml(student.id)}</td>
+          <td class="p-3 text-gray-800 text-sm font-medium">${escapeSummaryHtml(student.name)}</td>
+          <td class="p-3 text-center font-bold text-emerald-600">${Number(student.present) || 0}</td>
+          <td class="p-3 text-center font-bold text-rose-600">${Number(student.absent) || 0}</td>
+          <td class="p-3 text-center font-bold text-amber-600">${Number(student.late) || 0}</td>
+          <td class="p-3 text-center font-bold text-blue-600">${Number(student.leave) || 0}</td>
+          <td class="p-3 text-center font-bold text-purple-600">${Number(student.sick) || 0}</td>
+          <td class="p-3 text-center font-bold bg-gray-100">${Number(student.total) || 0}</td>
+          <td class="p-3 text-center font-bold ${percentColor}">${attendancePct}%</td>
+          <td class="p-3 text-center">
+            <button type="button" class="student-detail-btn px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-bold hover:bg-blue-200 active:scale-95"
+              data-student-id="${escapeSummaryHtml(student.id)}" data-student-name="${escapeSummaryHtml(student.name)}"
+              data-subject-key="${escapeSummaryHtml(subjectKey)}" data-start-date="${escapeSummaryHtml(startDate)}"
+              data-end-date="${escapeSummaryHtml(endDate)}" aria-label="ดูรายละเอียด ${escapeSummaryHtml(student.name)}">👁️</button>
+          </td>
+        </tr>
+      `);
+    });
+
+    tbody.append(`
+      <tr class="font-bold bg-blue-100">
+        <td colspan="3" class="p-3 text-center">รวมทั้งสิ้น</td>
+        <td class="p-3 text-center text-emerald-700">${Number(totals.present) || 0}</td>
+        <td class="p-3 text-center text-rose-700">${Number(totals.absent) || 0}</td>
+        <td class="p-3 text-center text-amber-700">${Number(totals.late) || 0}</td>
+        <td class="p-3 text-center text-blue-700">${Number(totals.leave) || 0}</td>
+        <td class="p-3 text-center text-purple-700">${Number(totals.sick) || 0}</td>
+        <td class="p-3 text-center">${total}</td>
+        <td class="p-3 text-center">${total ? '100.0%' : '0.0%'}</td>
+        <td></td>
+      </tr>
+    `);
+  }
+
+  tbody.off('click', '.student-detail-btn').on('click', '.student-detail-btn', function () {
+    viewStudentDetail(
+      $(this).attr('data-student-id'), $(this).attr('data-student-name'),
+      $(this).attr('data-subject-key'), $(this).attr('data-start-date'), $(this).attr('data-end-date')
+    );
+  });
+  currentSubjectCtx = { subjectKey, startDate, endDate };
+}
+
+function renderSubjectCharts(totals, dailyTrend) {
+  const pieCanvas = document.getElementById('subject-pie-chart');
+  if (pieCanvas) {
+    if (window.subjectPieChart) window.subjectPieChart.destroy();
+    window.subjectPieChart = new Chart(pieCanvas.getContext('2d'), {
+      type: 'pie',
+      data: {
+        labels: ['มา', 'ขาด', 'สาย', 'ลา', 'ป่วย'],
+        datasets: [{
+          data: [totals.present || 0, totals.absent || 0, totals.late || 0, totals.leave || 0, totals.sick || 0],
+          backgroundColor: ['#10b981', '#ef4444', '#eab308', '#3b82f6', '#a855f7']
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'right' }, title: { display: true, text: 'สัดส่วนการเข้าเรียน' } }
+      }
+    });
+  }
+
+  const dates = Object.keys(dailyTrend).sort();
+  const present = dates.map(date => dailyTrend[date].present || 0);
+  const others = dates.map(date => (dailyTrend[date].absent || 0) + (dailyTrend[date].leave || 0) + (dailyTrend[date].late || 0) + (dailyTrend[date].sick || 0));
+  const barCanvas = document.getElementById('subject-bar-chart');
+  if (barCanvas) {
+    if (window.subjectBarChart) window.subjectBarChart.destroy();
+    window.subjectBarChart = new Chart(barCanvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: dates.map(date => {
+          const parts = date.split('-');
+          return `${parseInt(parts[2], 10)}/${parseInt(parts[1], 10)}`;
+        }),
+        datasets: [
+          { label: 'มา', data: present, backgroundColor: '#10b981', stack: 'total' },
+          { label: 'ขาด/ลา/สาย/ป่วย', data: others, backgroundColor: '#ef4444', stack: 'total' }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'top' }, title: { display: true, text: 'แนวโน้มรายวัน' } },
+        scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } }
+      }
+    });
+  }
+}
+
+async function viewStudentDetail(studentId, studentName, subjectKey, startDate, endDate) {
+  const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
+  const teacherId = teacher.username || teacher.name || teacher.email || '';
+  $('#student-detail-title').text(`👁️ ${studentName}`);
+  $('#student-detail-sub').text(`รหัส: ${studentId}`);
+  $('#student-detail-modal').css('display', 'flex');
+
+  const tbody = $('#student-detail-tbody');
+  tbody.html('<tr><td colspan="3" class="text-center p-6 text-gray-400">กำลังโหลด...</td></tr>');
+  try {
+    const response = await runGoogleScript('getSubjectStudentDetail', teacherId, subjectKey, studentId, startDate, endDate);
+    tbody.empty();
+    if (response && response.status === 'success' && Array.isArray(response.data) && response.data.length) {
+      const statusClasses = {
+        'มา': 'bg-emerald-100 text-emerald-800', 'ขาด': 'bg-rose-100 text-rose-800',
+        'สาย': 'bg-amber-100 text-amber-800', 'ลา': 'bg-blue-100 text-blue-800',
+        'ป่วย': 'bg-purple-100 text-purple-800'
+      };
+      response.data.forEach(record => {
+        const statusClass = statusClasses[record.status] || 'bg-gray-100 text-gray-800';
+        tbody.append(`
+          <tr class="border-b border-gray-100 hover:bg-blue-50">
+            <td class="p-3 text-gray-700">${escapeSummaryHtml(record.date)}</td>
+            <td class="p-3 text-center"><span class="px-3 py-1 rounded-full text-xs font-bold ${statusClass}">${escapeSummaryHtml(record.status)}</span></td>
+            <td class="p-3 text-gray-600 text-sm">${escapeSummaryHtml(record.note || '—')}</td>
+          </tr>
+        `);
+      });
+    } else {
+      tbody.html('<tr><td colspan="3" class="text-center p-6 text-gray-400">ไม่พบข้อมูล</td></tr>');
+    }
+  } catch (error) {
+    tbody.html(`<tr><td colspan="3" class="text-center p-6 text-rose-500">${escapeSummaryHtml(error.message || error)}</td></tr>`);
+  }
 }
 
 </script>
