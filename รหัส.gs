@@ -1996,6 +1996,279 @@ function getCleaningDataForEdit(date, classroomId) {
   }
 }
 
+// ========================================
+// PHASE 3: Attendance Stats V2
+// ========================================
+
+function getAttendanceSummaryV2(startDate, endDate, period, classroomFilter) {
+  try {
+    const sheet = getOrCreateSheet(SHEET_NAMES.ATTENDANCE);
+    const cleanData = getCleanedAttendanceRows(sheet.getDataRange().getValues());
+    const summary = {}, dailyTrend = {};
+    const targetPeriod = String(period || '').trim();
+    const targetClassroom = String(classroomFilter || '').trim();
+
+    cleanData.forEach(row => {
+      const rowDate = formatDateStr(row[0]);
+      const rowPeriod = String(row[1] || '').trim();
+      const rowRoom = String(row[2] || '').trim();
+      if (startDate && rowDate < startDate) return;
+      if (endDate && rowDate > endDate) return;
+      if (targetPeriod && rowPeriod !== targetPeriod) return;
+      if (targetClassroom && rowRoom !== targetClassroom) return;
+
+      let students = [];
+      try { students = JSON.parse(row[4] || '[]'); } catch (e) {}
+
+      students.forEach(s => {
+        const sid = String(s.student_id || '').trim();
+        if (!sid) return;
+        const status = String(s.status || '').trim();
+        if (!summary[sid]) {
+          summary[sid] = {
+            id: sid, name: s.name || sid, classroom_id: rowRoom,
+            present: 0, absent: 0, late: 0, leave: 0, sick: 0, total: 0
+          };
+        }
+        const rec = summary[sid];
+        if (status === 'มา') rec.present++;
+        else if (status === 'ขาด') rec.absent++;
+        else if (status === 'สาย') rec.late++;
+        else if (status === 'ลา') rec.leave++;
+        else if (status === 'ป่วย') rec.sick++;
+        rec.total++;
+
+        if (!dailyTrend[rowDate]) dailyTrend[rowDate] = { present: 0, absent: 0, late: 0, leave: 0, sick: 0 };
+        if (status === 'มา') dailyTrend[rowDate].present++;
+        else if (status === 'ขาด') dailyTrend[rowDate].absent++;
+        else if (status === 'สาย') dailyTrend[rowDate].late++;
+        else if (status === 'ลา') dailyTrend[rowDate].leave++;
+        else if (status === 'ป่วย') dailyTrend[rowDate].sick++;
+      });
+    });
+
+    const students = Object.values(summary).sort((a, b) => {
+      if (a.classroom_id !== b.classroom_id) return a.classroom_id.localeCompare(b.classroom_id);
+      return a.id.localeCompare(b.id);
+    });
+
+    const totals = { present: 0, absent: 0, late: 0, leave: 0, sick: 0, total: 0 };
+    students.forEach(s => {
+      totals.present += s.present;
+      totals.absent += s.absent;
+      totals.late += s.late;
+      totals.leave += s.leave;
+      totals.sick += s.sick;
+      totals.total += s.total;
+    });
+
+    return { status: 'success', data: { students, totals, dailyTrend } };
+  } catch (err) {
+    Logger.log('Error in getAttendanceSummaryV2: ' + err.message);
+    return { status: 'error', message: err.toString() };
+  }
+}
+
+function getAttendanceStudentDetail(studentId, startDate, endDate, period) {
+  try {
+    const sheet = getOrCreateSheet(SHEET_NAMES.ATTENDANCE);
+    const cleanData = getCleanedAttendanceRows(sheet.getDataRange().getValues());
+    const result = [];
+    const targetStu = String(studentId || '').trim();
+    const targetPeriod = String(period || '').trim();
+
+    cleanData.forEach(row => {
+      const rowDate = formatDateStr(row[0]);
+      const rowPeriod = String(row[1] || '').trim();
+      if (startDate && rowDate < startDate) return;
+      if (endDate && rowDate > endDate) return;
+      if (targetPeriod && rowPeriod !== targetPeriod) return;
+
+      let students = [];
+      try { students = JSON.parse(row[4] || '[]'); } catch (e) {}
+      const found = students.find(s => String(s.student_id || '').trim() === targetStu);
+      if (found) {
+        result.push({
+          date: rowDate, period: rowPeriod,
+          status: found.status || '', reason: found.reason || ''
+        });
+      }
+    });
+
+    result.sort((a, b) => b.date.localeCompare(a.date));
+    return { status: 'success', data: result };
+  } catch (err) {
+    Logger.log('Error in getAttendanceStudentDetail: ' + err.message);
+    return { status: 'error', message: err.toString(), data: [] };
+  }
+}
+
+// ========================================
+// PHASE 3: Weekly Check Report (3 modes)
+// ========================================
+
+function getWeeklyCheckReport(startDate, endDate, mode, options) {
+  try {
+    const opts = options || {};
+
+    // Build weekDates (Mon-Fri)
+    const weekDates = [];
+    const [sy, sm, sd] = String(startDate).split('-').map(Number);
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(sy, sm - 1, sd + i);
+      const ds = Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      if (ds >= startDate && ds <= endDate) weekDates.push(ds);
+    }
+
+    const rows = [];
+
+    // ===== ATTENDANCE =====
+    if (mode === 'attendance') {
+      const targetPeriod = String(opts.period || '').trim();
+      const sheet = getOrCreateSheet(SHEET_NAMES.ATTENDANCE);
+      const cleanData = getCleanedAttendanceRows(sheet.getDataRange().getValues());
+      const checkMap = {};
+      cleanData.forEach(row => {
+        const rowDate = formatDateStr(row[0]);
+        const rowPeriod = String(row[1] || '').trim();
+        const rowRoom = String(row[2] || '').trim();
+        if (!weekDates.includes(rowDate)) return;
+        if (targetPeriod && rowPeriod !== targetPeriod) return;
+        if (!checkMap[rowRoom]) checkMap[rowRoom] = {};
+        checkMap[rowRoom][rowDate] = true;
+      });
+
+      const crRes = getClassrooms([]);
+      const classrooms = (crRes.data || []).sort((a, b) => a.name.localeCompare(b.name, 'th'));
+
+      // Student counts
+      const studentCounts = {};
+      const allStu = getAllStudents();
+      if (allStu.status === 'success') {
+        Object.keys(allStu.data).forEach(rid => { studentCounts[rid] = allStu.data[rid].length; });
+      }
+
+      classrooms.forEach(c => {
+        const dates = {};
+        weekDates.forEach(d => { dates[d] = !!(checkMap[c.id] && checkMap[c.id][d]); });
+        rows.push({
+          id: c.id, name: c.name,
+          sublabel: `${studentCounts[c.id] || 0} คน`,
+          dates, clickable: true, mode: 'attendance'
+        });
+      });
+
+    // ===== CLEANING =====
+    } else if (mode === 'cleaning') {
+      const sheet = getOrCreateSheet(CLEANING_SHEET_NAMES.ATTENDANCE);
+      const cleanData = getCleanedCleaningRows(sheet.getDataRange().getValues());
+      const checkMap = {};
+      cleanData.forEach(row => {
+        const rowDate = formatDateStr(row[0]);
+        const rowRoom = String(row[1] || '').trim();
+        if (!weekDates.includes(rowDate)) return;
+        if (!checkMap[rowRoom]) checkMap[rowRoom] = {};
+        checkMap[rowRoom][rowDate] = true;
+      });
+
+      const crRes = getClassrooms([]);
+      const classrooms = (crRes.data || []).sort((a, b) => a.name.localeCompare(b.name, 'th'));
+      const studentCounts = {};
+      const allStu = getAllStudents();
+      if (allStu.status === 'success') {
+        Object.keys(allStu.data).forEach(rid => { studentCounts[rid] = allStu.data[rid].length; });
+      }
+
+      classrooms.forEach(c => {
+        const dates = {};
+        weekDates.forEach(d => { dates[d] = !!(checkMap[c.id] && checkMap[c.id][d]); });
+        rows.push({
+          id: c.id, name: c.name,
+          sublabel: `${studentCounts[c.id] || 0} คน`,
+          dates, clickable: true, mode: 'cleaning'
+        });
+      });
+
+    // ===== SUBJECT =====
+    } else if (mode === 'subject') {
+      const teacherEmail = String(opts.teacherEmail || '').trim().toLowerCase();
+      const ss = getSpreadsheet();
+      const ttSheet = ss.getSheetByName('Timetable');
+      const attSheet = ss.getSheetByName('Attendance_Subjects');
+      if (!ttSheet) return { status: 'success', data: { weekDates, rows: [] } };
+
+      const ttData = ttSheet.getDataRange().getValues();
+      const days = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์"];
+
+      const scheduleByDate = {};
+      weekDates.forEach(d => {
+        const dayOfWeek = new Date(d + 'T00:00:00Z').getUTCDay();
+        const dayName = days[dayOfWeek];
+        scheduleByDate[d] = [];
+        for (let i = 1; i < ttData.length; i++) {
+          const r = ttData[i];
+          const rowDay = String(r[1] || '').trim();
+          const rowTeacher = String(r[5] || '').trim().toLowerCase();
+          if (rowDay === dayName && rowTeacher === teacherEmail) {
+            scheduleByDate[d].push({
+              code: String(r[3] || '').trim(),
+              name: String(r[4] || '').trim(),
+              grade: String(r[6] || '').trim(),
+              room: String(r[7] || '').trim(),
+              classroomId: String(r[8] || '').trim()
+            });
+          }
+        }
+      });
+
+      const checkMap = {};
+      if (attSheet) {
+        const attData = attSheet.getDataRange().getValues();
+        for (let i = 1; i < attData.length; i++) {
+          const r = attData[i];
+          const rowDate = formatDateStr(r[1]);
+          const rowCode = String(r[2] || '').trim();
+          const rowName = String(r[3] || '').trim();
+          const rowTeacher = String(r[4] || '').trim().toLowerCase();
+          const rowGrade = String(r[5] || '').trim();
+          const rowRoom = String(r[6] || '').trim();
+          if (!weekDates.includes(rowDate) || rowTeacher !== teacherEmail) continue;
+          const key = `${rowDate}_${rowCode || rowName}_${rowGrade}_${rowRoom}`;
+          checkMap[key] = true;
+        }
+      }
+
+      const rowMap = {};
+      weekDates.forEach(d => {
+        scheduleByDate[d].forEach(sch => {
+          const gradeRoom = sch.grade + (sch.room ? '/' + sch.room : '');
+          const key = `${sch.code || sch.name}_${gradeRoom}`;
+          if (!rowMap[key]) {
+            rowMap[key] = {
+              id: key,
+              name: sch.name + (sch.code ? ` (${sch.code})` : ''),
+              sublabel: gradeRoom,
+              dates: {},
+              meta: { code: sch.code, name: sch.name, grade: sch.grade, room: sch.room, classroomId: sch.classroomId },
+              clickable: true,
+              mode: 'subject'
+            };
+          }
+          const checkKey = `${d}_${sch.code || sch.name}_${sch.grade}_${sch.room}`;
+          rowMap[key].dates[d] = !!checkMap[checkKey];
+        });
+      });
+
+      Object.values(rowMap).sort((a, b) => a.name.localeCompare(b.name, 'th')).forEach(r => rows.push(r));
+    }
+
+    return { status: 'success', data: { weekDates, rows } };
+  } catch (err) {
+    Logger.log('Error in getWeeklyCheckReport: ' + err.message);
+    return { status: 'error', message: err.toString() };
+  }
+}
+
 function diagnoseSubjectAttendance() {
   var ss = getSpreadsheet();
   var out = [];

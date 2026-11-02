@@ -1366,4 +1366,393 @@ async function viewStudentDetail(studentId, studentName, subjectKey, startDate, 
   }
 }
 
+// ========================================
+// PHASE 3: Attendance Stats
+// ========================================
+
+function initAttendanceStats() {
+  const today = TODAY;
+  const d = new Date(today);
+  const start = new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0];
+
+  if (!$("#att-stats-start").val()) {
+    flatpickr("#att-stats-start", { dateFormat: "Y-m-d", locale: "th", defaultDate: start });
+    flatpickr("#att-stats-end", { dateFormat: "Y-m-d", locale: "th", defaultDate: today });
+  }
+
+  if ($("#att-stats-period option").length <= 1) {
+    PERIODS.forEach(p => $("#att-stats-period").append(`<option value="${p.id}">${p.name}</option>`));
+  }
+
+  if ($("#att-stats-classroom option").length <= 1) {
+    ALL_CLASSROOMS.forEach(c => $("#att-stats-classroom").append(`<option value="${c.id}">${c.name}</option>`));
+  }
+
+  $("#att-stats-run").off("click").on("click", runAttendanceStats);
+}
+
+async function runAttendanceStats() {
+  const startDate = $("#att-stats-start").val();
+  const endDate = $("#att-stats-end").val();
+  const period = $("#att-stats-period").val();
+  const classroom = $("#att-stats-classroom").val();
+
+  if (!startDate || !endDate) return Swal.fire('แจ้งเตือน', 'กรุณาเลือกช่วงวันที่', 'warning');
+  if (startDate > endDate) return Swal.fire('แจ้งเตือน', 'วันที่ไม่ถูกต้อง', 'warning');
+
+  $.LoadingOverlay("show", { text: "กำลังประมวลผล..." });
+  try {
+    const res = await runGoogleScript('getAttendanceSummaryV2', startDate, endDate, period, classroom);
+    if (res.status !== 'success') throw new Error(res.message);
+    renderAttendanceStats(res.data, startDate, endDate, period, classroom);
+    $("#att-stats-empty").addClass("hidden");
+    $("#att-stats-content").removeClass("hidden");
+  } catch (error) {
+    Swal.fire('ผิดพลาด', error.message, 'error');
+  } finally {
+    $.LoadingOverlay("hide");
+  }
+}
+
+function renderAttendanceStats(data, startDate, endDate, period, classroom) {
+  const totals = data.totals || { present: 0, absent: 0, late: 0, leave: 0, sick: 0, total: 0 };
+  const total = totals.total || 1;
+  const pct = (n) => ((n / total) * 100).toFixed(1) + '%';
+
+  $("#att-card-present").text(totals.present);
+  $("#att-card-present-pct").text(pct(totals.present));
+  $("#att-card-absent").text(totals.absent);
+  $("#att-card-absent-pct").text(pct(totals.absent));
+  $("#att-card-late").text(totals.late);
+  $("#att-card-late-pct").text(pct(totals.late));
+  $("#att-card-leave").text(totals.leave);
+  $("#att-card-leave-pct").text(pct(totals.leave));
+  $("#att-card-sick").text(totals.sick);
+  $("#att-card-sick-pct").text(pct(totals.sick));
+
+  renderAttendanceCharts(totals, data.dailyTrend || {});
+
+  $("#att-stats-title").text(`📋 สรุปรายบุคคล — ${data.students.length} คน (รวม ${totals.total} ครั้ง)`);
+
+  const tbody = $("#att-stats-tbody").empty();
+  if (data.students.length === 0) {
+    tbody.append('<tr><td colspan="11" class="text-center p-6 text-gray-400">ไม่พบข้อมูล</td></tr>');
+  } else {
+    data.students.forEach(s => {
+      const percent = s.total > 0 ? ((s.present / s.total) * 100).toFixed(0) : 0;
+      const roomName = (ALL_CLASSROOMS.find(c => c.id === s.classroom_id) || {}).name || s.classroom_id;
+      const percentColor = percent >= 80 ? 'text-emerald-600' : percent >= 50 ? 'text-amber-600' : 'text-rose-600';
+
+      tbody.append(`
+        <tr class="border-b border-gray-100 hover:bg-blue-50">
+          <td class="p-3 text-center text-gray-600 text-sm">${escapeSummaryHtml(roomName)}</td>
+          <td class="p-3 text-center text-gray-600 text-sm">${escapeSummaryHtml(s.id)}</td>
+          <td class="p-3 text-gray-800 text-sm font-medium">${escapeSummaryHtml(s.name)}</td>
+          <td class="p-3 text-center font-bold text-emerald-600">${s.present}</td>
+          <td class="p-3 text-center font-bold text-rose-600">${s.absent}</td>
+          <td class="p-3 text-center font-bold text-amber-600">${s.late}</td>
+          <td class="p-3 text-center font-bold text-blue-600">${s.leave}</td>
+          <td class="p-3 text-center font-bold text-purple-600">${s.sick}</td>
+          <td class="p-3 text-center font-bold bg-gray-100">${s.total}</td>
+          <td class="p-3 text-center font-bold ${percentColor}">${percent}%</td>
+          <td class="p-3 text-center">
+            <button type="button" data-student-id="${escapeSummaryHtml(s.id)}" data-student-name="${escapeSummaryHtml(s.name)}"
+                    class="attendance-student-detail px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-bold hover:bg-blue-200"
+                    aria-label="ดูรายละเอียด ${escapeSummaryHtml(s.name)}">
+              👁️
+            </button>
+          </td>
+        </tr>
+      `);
+    });
+
+    tbody.append(`
+      <tr class="font-bold bg-blue-100">
+        <td colspan="3" class="p-3 text-center">รวมทั้งสิ้น</td>
+        <td class="p-3 text-center text-emerald-700">${totals.present}</td>
+        <td class="p-3 text-center text-rose-700">${totals.absent}</td>
+        <td class="p-3 text-center text-amber-700">${totals.late}</td>
+        <td class="p-3 text-center text-blue-700">${totals.leave}</td>
+        <td class="p-3 text-center text-purple-700">${totals.sick}</td>
+        <td class="p-3 text-center">${totals.total}</td>
+        <td class="p-3 text-center">100%</td>
+        <td></td>
+      </tr>
+    `);
+  }
+  tbody.off('click', '.attendance-student-detail').on('click', '.attendance-student-detail', function() {
+    viewAttendanceStudentDetail($(this).attr('data-student-id'), $(this).attr('data-student-name'));
+  });
+}
+
+function renderAttendanceCharts(totals, dailyTrend) {
+  const pieCanvas = document.getElementById('att-pie-chart');
+  if (pieCanvas) {
+    if (window.attPieChart) window.attPieChart.destroy();
+    window.attPieChart = new Chart(pieCanvas.getContext('2d'), {
+      type: 'pie',
+      data: {
+        labels: ['มา', 'ขาด', 'สาย', 'ลา', 'ป่วย'],
+        datasets: [{
+          data: [totals.present, totals.absent, totals.late, totals.leave, totals.sick],
+          backgroundColor: ['#10b981', '#ef4444', '#eab308', '#3b82f6', '#a855f7']
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'right' }, title: { display: true, text: 'สัดส่วนการเข้าแถว' } }
+      }
+    });
+  }
+
+  const dates = Object.keys(dailyTrend).sort();
+  const present = dates.map(d => dailyTrend[d].present);
+  const others = dates.map(d => dailyTrend[d].absent + dailyTrend[d].late + dailyTrend[d].leave + dailyTrend[d].sick);
+
+  const barCanvas = document.getElementById('att-bar-chart');
+  if (barCanvas) {
+    if (window.attBarChart) window.attBarChart.destroy();
+    window.attBarChart = new Chart(barCanvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: dates.map(d => { const p = d.split('-'); return `${parseInt(p[2])}/${parseInt(p[1])}`; }),
+        datasets: [
+          { label: 'มา', data: present, backgroundColor: '#10b981', stack: 'total' },
+          { label: 'ขาด/ลา/สาย/ป่วย', data: others, backgroundColor: '#ef4444', stack: 'total' }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'top' }, title: { display: true, text: 'แนวโน้มรายวัน' } },
+        scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } }
+      }
+    });
+  }
+}
+
+async function viewAttendanceStudentDetail(studentId, studentName) {
+  const startDate = $("#att-stats-start").val();
+  const endDate = $("#att-stats-end").val();
+  const period = $("#att-stats-period").val();
+
+  $("#student-detail-title").text(`👁️ ${studentName}`);
+  $("#student-detail-sub").text(`รหัส: ${studentId} | เข้าแถว`);
+  $("#student-detail-modal").css('display', 'flex');
+
+  const tbody = $("#student-detail-tbody");
+  tbody.html('<tr><td colspan="3" class="text-center p-6 text-gray-400">กำลังโหลด...</td></tr>');
+
+  try {
+    const res = await runGoogleScript('getAttendanceStudentDetail', studentId, startDate, endDate, period);
+    tbody.empty();
+    if (res.status === 'success' && res.data.length > 0) {
+      const colorMap = {
+        'มา': 'bg-emerald-100 text-emerald-800', 'ขาด': 'bg-rose-100 text-rose-800',
+        'สาย': 'bg-amber-100 text-amber-800', 'ลา': 'bg-blue-100 text-blue-800',
+        'ป่วย': 'bg-purple-100 text-purple-800'
+      };
+      const periodMap = { morning: 'เช้า', noon: 'เที่ยง', evening: 'เย็น' };
+      res.data.forEach(r => {
+        const cls = colorMap[r.status] || 'bg-gray-100';
+        tbody.append(`
+          <tr class="border-b border-gray-100 hover:bg-blue-50">
+            <td class="p-3 text-gray-700">${escapeSummaryHtml(r.date)} <span class="text-xs text-gray-400">(${escapeSummaryHtml(periodMap[r.period] || r.period)})</span></td>
+            <td class="p-3 text-center"><span class="px-3 py-1 rounded-full text-xs font-bold ${cls}">${escapeSummaryHtml(r.status)}</span></td>
+            <td class="p-3 text-gray-600 text-sm">${escapeSummaryHtml(r.reason || '—')}</td>
+          </tr>
+        `);
+      });
+    } else {
+      tbody.html('<tr><td colspan="3" class="text-center p-6 text-gray-400">ไม่พบข้อมูล</td></tr>');
+    }
+  } catch (err) {
+    tbody.html(`<tr><td colspan="3" class="text-center p-6 text-rose-500">${err.message}</td></tr>`);
+  }
+}
+
+// ========================================
+// PHASE 3: Weekly Summary
+// ========================================
+
+let weeklyState = {
+  currentMode: 'attendance',
+  currentStartDate: null,
+  currentEndDate: null,
+  currentPeriod: 'morning'
+};
+
+function initWeeklySummary() {
+  setWeek(TODAY);
+
+  $(".weekly-mode-btn").off("click").on("click", function() {
+    $(".weekly-mode-btn").removeClass("bg-blue-700 text-white").addClass("bg-gray-100 text-gray-600");
+    $(this).removeClass("bg-gray-100 text-gray-600").addClass("bg-blue-700 text-white");
+    weeklyState.currentMode = $(this).data('mode');
+    $("#weekly-period-row").toggle(weeklyState.currentMode === 'attendance');
+    loadWeeklyReport();
+  });
+
+  loadPeriodButtons("#weekly-period-buttons");
+  $("#weekly-period-buttons").off("click", ".period-btn").on("click", ".period-btn", function() {
+    $("#weekly-period-buttons .period-btn").removeClass("active text-white").addClass("text-gray-700 bg-white");
+    $(this).addClass("active text-white").removeClass("text-gray-700 bg-white");
+    weeklyState.currentPeriod = $(this).data('period');
+    loadWeeklyReport();
+  });
+
+  $("#weekly-prev").off("click").on("click", () => shiftWeek(-7));
+  $("#weekly-next").off("click").on("click", () => shiftWeek(7));
+
+  loadWeeklyReport();
+}
+
+function setWeek(baseDateStr) {
+  const d = new Date(baseDateStr);
+  const dayOfWeek = d.getDay();
+  const firstDay = new Date(d);
+  firstDay.setDate(d.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+  const lastDay = new Date(firstDay);
+  lastDay.setDate(firstDay.getDate() + 4);
+
+  const fmt = (dt) => {
+    const p = [dt.getFullYear(), String(dt.getMonth() + 1).padStart(2, '0'), String(dt.getDate()).padStart(2, '0')];
+    return p.join('-');
+  };
+
+  weeklyState.currentStartDate = fmt(firstDay);
+  weeklyState.currentEndDate = fmt(lastDay);
+  updateWeeklyRangeLabel();
+}
+
+function shiftWeek(days) {
+  const d = new Date(weeklyState.currentStartDate);
+  d.setDate(d.getDate() + days);
+  const fmt = (dt) => {
+    const p = [dt.getFullYear(), String(dt.getMonth() + 1).padStart(2, '0'), String(dt.getDate()).padStart(2, '0')];
+    return p.join('-');
+  };
+  setWeek(fmt(d));
+  loadWeeklyReport();
+}
+
+function updateWeeklyRangeLabel() {
+  const fmt = (ds) => {
+    const p = ds.split('-');
+    return `${parseInt(p[2])}/${parseInt(p[1])}`;
+  };
+  const year = parseInt(weeklyState.currentStartDate.split('-')[0]) + 543;
+  $("#weekly-range").text(`${fmt(weeklyState.currentStartDate)} - ${fmt(weeklyState.currentEndDate)} / ${year}`);
+}
+
+async function loadWeeklyReport() {
+  $("#weekly-empty").show().text("กำลังโหลด...");
+  $("#weekly-table-container").addClass("hidden");
+
+  const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
+  const teacherEmail = teacher.username || teacher.email || '';
+
+  const options = {
+    period: weeklyState.currentMode === 'attendance' ? weeklyState.currentPeriod : '',
+    teacherEmail: teacherEmail
+  };
+
+  try {
+    const res = await runGoogleScript('getWeeklyCheckReport',
+      weeklyState.currentStartDate, weeklyState.currentEndDate,
+      weeklyState.currentMode, options);
+    if (res.status !== 'success') throw new Error(res.message);
+    renderWeeklyTable(res.data, weeklyState.currentMode);
+    $("#weekly-empty").hide();
+    $("#weekly-table-container").removeClass("hidden");
+  } catch (err) {
+    $("#weekly-empty").text("ผิดพลาด: " + err.message);
+  }
+}
+
+function renderWeeklyTable(data, mode) {
+  const { weekDates, rows } = data;
+  const dayNames = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
+
+  // Header
+  let thead = '<tr class="bg-blue-700 text-white">';
+  thead += '<th class="p-3 text-left">รายการ</th>';
+  weekDates.forEach(d => {
+    const dayOfWeek = new Date(d + 'T00:00:00Z').getUTCDay();
+    const [_, m, dd] = d.split('-');
+    thead += `<th class="p-3 text-center">${dayNames[dayOfWeek]}<br><span class="text-xs opacity-75">${parseInt(dd)}/${parseInt(m)}</span></th>`;
+  });
+  thead += '<th class="p-3 text-center">รวม</th><th class="p-3 text-center">%</th>';
+  thead += '</tr>';
+  $("#weekly-thead").html(thead);
+
+  // Body
+  const tbody = $("#weekly-tbody").empty();
+
+  rows.forEach(r => {
+    const scheduledDates = weekDates.filter(d => d in r.dates);
+    const checkedCount = scheduledDates.filter(d => r.dates[d] === true).length;
+    const pct = scheduledDates.length > 0 ? ((checkedCount / scheduledDates.length) * 100).toFixed(0) : 0;
+    const pctColor = pct >= 80 ? 'text-emerald-600' : pct >= 50 ? 'text-amber-600' : 'text-rose-600';
+
+    let html = `<tr class="border-b border-gray-100 hover:bg-blue-50">`;
+    html += `<td class="p-3 font-medium text-gray-800">${escapeSummaryHtml(r.name)}${r.sublabel ? ` <span class="text-xs text-gray-500">(${escapeSummaryHtml(r.sublabel)})</span>` : ''}</td>`;
+
+    weekDates.forEach(d => {
+      const isScheduled = d in r.dates;
+      const isChecked = r.dates[d] === true;
+      if (!isScheduled) {
+        html += '<td class="p-3 text-center text-gray-300">—</td>';
+      } else {
+        const icon = isChecked ? '<span class="text-emerald-600 font-bold">✓</span>' : '<span class="text-red-500 font-bold">⚡</span>';
+        const cursor = r.clickable ? 'cursor-pointer hover:bg-blue-100' : '';
+        const clickData = r.clickable
+          ? `data-date="${escapeSummaryHtml(d)}" data-row-id="${escapeSummaryHtml(r.id)}" data-mode="${escapeSummaryHtml(mode)}" data-meta="${escapeSummaryHtml(JSON.stringify(r.meta || {}))}"`
+          : '';
+        html += `<td class="p-3 text-center ${cursor} ${r.clickable ? 'weekly-cell' : ''}" ${clickData}>${icon}</td>`;
+      }
+    });
+
+    html += `<td class="p-3 text-center font-bold">${checkedCount}/${scheduledDates.length}</td>`;
+    html += `<td class="p-3 text-center font-bold ${pctColor}">${pct}%</td>`;
+    html += '</tr>';
+    tbody.append(html);
+  });
+
+  tbody.off('click', '.weekly-cell').on('click', '.weekly-cell', function() {
+    const cell = $(this);
+    handleWeeklyCellClick(cell.attr('data-date'), cell.attr('data-row-id'), cell.attr('data-mode'), cell.attr('data-meta') || '{}');
+  });
+
+  // Footer
+  let tfoot = '<tr class="bg-blue-100 font-bold">';
+  tfoot += '<td class="p-3">รวม</td>';
+  weekDates.forEach(d => {
+    let checked = 0, total = 0;
+    rows.forEach(r => {
+      if (d in r.dates) {
+        total++;
+        if (r.dates[d]) checked++;
+      }
+    });
+    tfoot += `<td class="p-3 text-center">${checked}/${total}</td>`;
+  });
+  tfoot += '<td class="p-3 text-center">—</td><td class="p-3 text-center">—</td></tr>';
+  $("#weekly-tfoot").html(tfoot);
+}
+
+function handleWeeklyCellClick(date, rowId, mode, metaJson) {
+  const meta = JSON.parse(metaJson);
+
+  if (mode === 'attendance') {
+    const roomName = (ALL_CLASSROOMS.find(c => c.id === rowId) || {}).name || rowId;
+    openAttendanceModal(date, weeklyState.currentPeriod, rowId, roomName);
+  } else if (mode === 'cleaning') {
+    const roomName = (ALL_CLASSROOMS.find(c => c.id === rowId) || {}).name || rowId;
+    openCleaningModal(date, rowId, roomName);
+  } else if (mode === 'subject') {
+    // เปิด subject modal พร้อม preselect
+    openSubjectAttendanceModal({ date: date, subjectCode: meta.code });
+  }
+}
+
 </script>

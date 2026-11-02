@@ -103,12 +103,15 @@
     let currentDateStr = '';
 
     $(document).ready(function() {
-      const todayStr = new Date().toISOString().split('T')[0];
-      currentDateStr = todayStr;
+      const params = new URLSearchParams(window.location.search);
+      const preselectDate = params.get('date');
+      const preselectSubject = params.get('subject');
+      const targetDate = preselectDate || new Date().toISOString().split('T')[0];
+      currentDateStr = targetDate;
 
       flatpickr("#subject-date", {
         dateFormat: "Y-m-d",
-        defaultDate: todayStr,
+        defaultDate: targetDate,
         locale: "th",
         allowInput: true,
         onChange: function(selectedDates, dateStr) {
@@ -118,10 +121,10 @@
         }
       });
 
-      loadTeacherSchedule(todayStr);
+      loadTeacherSchedule(targetDate, preselectSubject);
     });
 
-    function loadTeacherSchedule(dateStr) {
+    function loadTeacherSchedule(dateStr, preselectSubject) {
   const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
   const teacherEmail = teacher.email || teacher.username;
 
@@ -162,13 +165,16 @@
           return;
         }
 
+        let preselectIndex = -1;
         currentScheduleList.forEach((sch, index) => {
           let codeText = sch.subjectCode ? ` (${sch.subjectCode})` : '';
           let roomText = "";
           if (sch.gradeLevel && sch.room) roomText = ` - ${sch.gradeLevel}/${sch.room}`;
           else if (sch.gradeLevel || sch.room) roomText = ` - ${sch.gradeLevel || sch.room}`;
           select.append(`<option value="${index}">คาบที่ ${sch.period} : ${sch.subjectName}${codeText}${roomText}</option>`);
+          if (preselectSubject && sch.subjectCode === preselectSubject && preselectIndex === -1) preselectIndex = index;
         });
+        if (preselectIndex >= 0) select.val(String(preselectIndex)).trigger('change');
       } else {
         const errMsg = (res && res.message) ? res.message : 'response ไม่ถูกต้อง';
         select.html(`<option value="">-- โหลดไม่สำเร็จ: ${errMsg} --</option>`);

@@ -362,6 +362,8 @@
 
   <button class="nav-tab" data-tab="classroom-summary">📊 รายห้อง</button>
   <button class="nav-tab" data-tab="overall-summary">🏫 ภาพรวม</button>
+  <button class="nav-tab" data-tab="attendance-stats">📊 สถิติเข้าแถว</button>
+  <button class="nav-tab" data-tab="weekly-summary">📆 สรุปรายสัปดาห์</button>
 </div>
     </div>
 
@@ -705,6 +707,136 @@
         </div>
       </div>
     </div>
+
+<!-- ===== Attendance Stats ===== -->
+<div id="attendance-stats" class="tab-content hidden">
+  <div class="app-card p-5 mb-5">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div>
+        <label class="block text-gray-500 text-sm font-bold mb-1">📅 จาก</label>
+        <input type="text" id="att-stats-start" class="w-full">
+      </div>
+      <div>
+        <label class="block text-gray-500 text-sm font-bold mb-1">📅 ถึง</label>
+        <input type="text" id="att-stats-end" class="w-full">
+      </div>
+      <div>
+        <label class="block text-gray-500 text-sm font-bold mb-1">⏰ ช่วงเวลา</label>
+        <select id="att-stats-period" class="w-full"><option value="">ทุกช่วง</option></select>
+      </div>
+      <div>
+        <label class="block text-gray-500 text-sm font-bold mb-1">🏫 ห้อง</label>
+        <select id="att-stats-classroom" class="w-full"><option value="">ทุกห้อง</option></select>
+      </div>
+    </div>
+    <div class="mt-4 flex justify-end">
+      <button id="att-stats-run" class="px-6 py-3 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-2xl font-bold shadow-lg shadow-blue-500/20 active:scale-95 transition">
+        🔍 ประมวลผล
+      </button>
+    </div>
+  </div>
+
+  <div id="att-stats-empty" class="app-card p-5 text-center py-12 text-gray-400">
+    เลือกช่วงวันที่แล้วกดประมวลผล
+  </div>
+
+  <div id="att-stats-content" class="hidden">
+    <div class="app-card p-5 mb-5">
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div class="p-4 text-center rounded-2xl" style="background:#dcfce7;">
+          <div class="text-xs font-bold text-emerald-800">✓ มา</div>
+          <div id="att-card-present" class="text-2xl font-extrabold text-emerald-700 mt-1">0</div>
+          <div id="att-card-present-pct" class="text-xs text-emerald-600">0%</div>
+        </div>
+        <div class="p-4 text-center rounded-2xl" style="background:#fee2e2;">
+          <div class="text-xs font-bold text-rose-800">✗ ขาด</div>
+          <div id="att-card-absent" class="text-2xl font-extrabold text-rose-700 mt-1">0</div>
+          <div id="att-card-absent-pct" class="text-xs text-rose-600">0%</div>
+        </div>
+        <div class="p-4 text-center rounded-2xl" style="background:#fef3c7;">
+          <div class="text-xs font-bold text-amber-800">⏰ สาย</div>
+          <div id="att-card-late" class="text-2xl font-extrabold text-amber-700 mt-1">0</div>
+          <div id="att-card-late-pct" class="text-xs text-amber-600">0%</div>
+        </div>
+        <div class="p-4 text-center rounded-2xl" style="background:#dbeafe;">
+          <div class="text-xs font-bold text-blue-800">📝 ลา</div>
+          <div id="att-card-leave" class="text-2xl font-extrabold text-blue-700 mt-1">0</div>
+          <div id="att-card-leave-pct" class="text-xs text-blue-600">0%</div>
+        </div>
+        <div class="p-4 text-center rounded-2xl" style="background:#f3e8ff;">
+          <div class="text-xs font-bold text-purple-800">🤒 ป่วย</div>
+          <div id="att-card-sick" class="text-2xl font-extrabold text-purple-700 mt-1">0</div>
+          <div id="att-card-sick-pct" class="text-xs text-purple-600">0%</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="app-card p-5 mb-5">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div class="bg-gray-50 p-4 rounded-2xl h-80"><canvas id="att-pie-chart"></canvas></div>
+        <div class="bg-gray-50 p-4 rounded-2xl h-80"><canvas id="att-bar-chart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="app-card p-5">
+      <h3 id="att-stats-title" class="text-lg font-bold text-gray-800 mb-3"></h3>
+      <div class="table-responsive">
+        <table class="min-w-full">
+          <thead>
+            <tr class="bg-blue-700 text-white">
+              <th class="p-3 text-center">ห้อง</th>
+              <th class="p-3 text-center">รหัส</th>
+              <th class="p-3 text-left">ชื่อ-สกุล</th>
+              <th class="p-3 text-center text-emerald-200">มา</th>
+              <th class="p-3 text-center text-rose-200">ขาด</th>
+              <th class="p-3 text-center text-amber-200">สาย</th>
+              <th class="p-3 text-center text-blue-200">ลา</th>
+              <th class="p-3 text-center text-purple-200">ป่วย</th>
+              <th class="p-3 text-center">รวม</th>
+              <th class="p-3 text-center">%</th>
+              <th class="p-3 text-center">ดู</th>
+            </tr>
+          </thead>
+          <tbody id="att-stats-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Weekly Summary ===== -->
+<div id="weekly-summary" class="tab-content hidden">
+  <div class="app-card p-5 mb-5">
+    <div class="flex flex-col md:flex-row gap-4 items-center">
+      <div class="flex gap-2 items-center">
+        <button id="weekly-prev" class="px-4 py-2 bg-gray-100 rounded-xl font-bold active:scale-95">◀</button>
+        <div id="weekly-range" class="px-4 py-2 bg-blue-50 rounded-xl font-bold text-blue-900 min-w-[220px] text-center"></div>
+        <button id="weekly-next" class="px-4 py-2 bg-gray-100 rounded-xl font-bold active:scale-95">▶</button>
+      </div>
+      <div class="flex gap-2 ml-auto flex-wrap">
+        <button class="weekly-mode-btn px-4 py-2 rounded-xl font-bold bg-blue-700 text-white" data-mode="attendance">📝 เข้าแถว</button>
+        <button class="weekly-mode-btn px-4 py-2 rounded-xl font-bold bg-gray-100 text-gray-600" data-mode="cleaning">🧹 เขตพื้นที่</button>
+        <button class="weekly-mode-btn px-4 py-2 rounded-xl font-bold bg-gray-100 text-gray-600" data-mode="subject">📚 เข้าเรียน</button>
+      </div>
+    </div>
+    <div id="weekly-period-row" class="mt-3 flex gap-2 items-center">
+      <label class="text-sm font-bold text-gray-500">⏰ ช่วงเวลา:</label>
+      <div id="weekly-period-buttons" class="flex gap-2"></div>
+    </div>
+  </div>
+
+  <div class="app-card p-5">
+    <div id="weekly-empty" class="text-center py-12 text-gray-400">กำลังโหลด...</div>
+    <div id="weekly-table-container" class="hidden table-responsive">
+      <table class="min-w-full">
+        <thead id="weekly-thead"></thead>
+        <tbody id="weekly-tbody"></tbody>
+        <tfoot id="weekly-tfoot"></tfoot>
+      </table>
+    </div>
+  </div>
+</div>
+
   </div>
   <footer class="text-center text-gray-500 text-sm mt-8 pb-4">
     <p id="footer-system-admin"></p>

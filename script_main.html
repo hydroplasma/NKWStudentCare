@@ -964,6 +964,10 @@
                         loadCleaningSummary();
                     } else if (tabId === "subject-summary") {
                         initSubjectSummary();
+                    } else if (tabId === "attendance-stats") {
+                        initAttendanceStats();
+                    } else if (tabId === "weekly-summary") {
+                        initWeeklySummary();
                     } else if (tabId === "classroom-summary") {
                         loadClassroomSummary();
                     } else if (tabId === "overall-summary") {
@@ -1133,19 +1137,15 @@ function goToDateAndCheck(dateStr, classroomId, classroomName) {
   openAttendanceModal(dateStr, period, classroomId, classroomName);
 }
 // ฟังก์ชันเปิดหน้าต่างเช็คเข้าเรียน (Modal) — ใช้ iframe + doGet route
-function openSubjectAttendanceModal() {
-  // สร้าง modal ครั้งแรกเท่านั้น
+function openSubjectAttendanceModal(options) {
+  options = options || {};
   if ($('#subject-attendance-modal').length === 0) {
     $('body').append(`
-      <div id="subject-attendance-modal"
-           class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-           style="display:none;">
+      <div id="subject-attendance-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" style="display:none;">
         <div class="app-card w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden bg-white shadow-2xl rounded-3xl">
           <div class="flex justify-between items-center p-5 bg-gradient-to-r from-blue-700 to-indigo-800 text-white">
             <h2 class="text-lg font-bold">📚 เช็คชื่อเข้าเรียนรายวิชา</h2>
-            <button type="button"
-                    class="text-white hover:text-gray-200 text-2xl font-bold leading-none"
-                    onclick="$('#subject-attendance-modal').hide()">×</button>
+            <button type="button" class="text-white text-2xl font-bold leading-none" onclick="$('#subject-attendance-modal').hide()">×</button>
           </div>
           <div class="relative flex-grow w-full" style="height: 80vh;">
             <iframe id="subject-attendance-frame" class="w-full h-full border-none"></iframe>
@@ -1155,25 +1155,27 @@ function openSubjectAttendanceModal() {
     `);
   }
 
-  $.LoadingOverlay("show", { text: "กำลังโหลดระบบเช็คชื่อรายวิชา..." });
+  $.LoadingOverlay("show", { text: "กำลังโหลด..." });
 
-  google.script.run
-    .withSuccessHandler(function (url) {
-      const iframe = document.getElementById('subject-attendance-frame');
-      // ใส่ cache-buster เพื่อบังคับ reload ทุกครั้งที่เปิด
-      iframe.src = url + '?page=subject_attendance&t=' + Date.now();
+  google.script.run.withSuccessHandler(function(url) {
+    const params = new URLSearchParams();
+    params.set('page', 'subject_attendance');
+    if (options.date) params.set('date', options.date);
+    if (options.subjectCode) params.set('subject', options.subjectCode);
+    params.set('t', Date.now());
 
-      iframe.onload = function () {
-        $.LoadingOverlay("hide");
-        $('#subject-attendance-modal').css('display', 'flex');
-      };
-    })
-    .withFailureHandler(function (err) {
+    const iframe = document.getElementById('subject-attendance-frame');
+    iframe.src = url + '?' + params.toString();
+    iframe.onload = function() {
       $.LoadingOverlay("hide");
-      Swal.fire('Error', 'ไม่สามารถโหลดหน้าต่างเช็คชื่อรายวิชาได้: ' + err.message, 'error');
-    })
-    .getScriptUrl(); // ฟังก์ชันนี้มีอยู่แล้วใน Code.gs
+      $('#subject-attendance-modal').css('display', 'flex');
+    };
+  }).withFailureHandler(function(err) {
+    $.LoadingOverlay("hide");
+    Swal.fire('Error', err.message, 'error');
+  }).getScriptUrl();
 }
+
 // CLEANING TAB — Phase 1
 // ========================================
 
