@@ -985,6 +985,7 @@ function renderCleaningSummary(data) {
   }
 
   renderCleaningCharts(data.studentStats || [], data.scoreDetails || []);
+  renderCleaningStudentList(data.allStudents || data.studentStats || []);
 }
 
 // ========================================
@@ -994,11 +995,11 @@ function renderCleaningSummary(data) {
 function renderCleaningCharts(studentStats, scoreDetails) {
   let done = 0;
   let notDone = 0;
-  let escaped = 0;
+  let leave = 0;
   (studentStats || []).forEach(student => {
     done += Number(student.done) || 0;
     notDone += Number(student.not_done) || 0;
-    escaped += Number(student.escaped) || 0;
+    leave += Number(student.leave) || 0;
   });
 
   const pieCanvas = document.getElementById('clean-pie-chart');
@@ -1007,8 +1008,8 @@ function renderCleaningCharts(studentStats, scoreDetails) {
     window.cleanPieChart = new Chart(pieCanvas.getContext('2d'), {
       type: 'pie',
       data: {
-        labels: ['ทำ', 'ไม่ทำ', 'หนีเวร'],
-        datasets: [{ data: [done, notDone, escaped], backgroundColor: ['#10b981', '#f97316', '#ef4444'] }]
+        labels: ['ทำ', 'ไม่ทำ', 'ลา'],
+        datasets: [{ data: [done, notDone, leave], backgroundColor: ['#10b981', '#f97316', '#ef4444'] }]
       },
       options: {
         responsive: true, maintainAspectRatio: false,
@@ -1051,6 +1052,89 @@ function renderCleaningCharts(studentStats, scoreDetails) {
         scales: { y: { beginAtZero: true, max: 100 } }
       }
     });
+  }
+}
+
+function renderCleaningStudentList(students) {
+  const tbody = $("#clean-student-list");
+  tbody.empty();
+
+  if (!Array.isArray(students) || students.length === 0) {
+    tbody.append('<tr><td colspan="8" class="text-center p-4 text-gray-400">ไม่มีข้อมูล</td></tr>');
+    return;
+  }
+
+  students.forEach(student => {
+    const studentId = String(student.student_id == null ? '' : student.student_id);
+    const studentName = String(student.name == null ? '' : student.name);
+    const roomId = String(student.classroom_id == null ? '' : student.classroom_id);
+    const room = (ALL_CLASSROOMS || []).find(classroom => String(classroom.id) === roomId);
+    const roomName = room ? room.name : roomId;
+
+    tbody.append(`
+      <tr class="border-b border-gray-100 hover:bg-blue-50">
+        <td class="p-3 text-center text-gray-600 text-sm">${escapeSummaryHtml(roomName)}</td>
+        <td class="p-3 text-center text-gray-600 text-sm">${escapeSummaryHtml(studentId)}</td>
+        <td class="p-3 text-gray-800 text-sm font-medium">${escapeSummaryHtml(studentName)}</td>
+        <td class="p-3 text-center font-bold text-emerald-600">${Number(student.done) || 0}</td>
+        <td class="p-3 text-center font-bold text-rose-600">${Number(student.not_done) || 0}</td>
+        <td class="p-3 text-center font-bold text-blue-600">${Number(student.leave) || 0}</td>
+        <td class="p-3 text-center font-bold bg-gray-100">${Number(student.total) || 0}</td>
+        <td class="p-3 text-center">
+          <button type="button" data-student-id="${escapeSummaryHtml(studentId)}" data-student-name="${escapeSummaryHtml(studentName)}"
+                  class="cleaning-student-detail px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-bold hover:bg-blue-200 active:scale-95"
+                  aria-label="ดูรายละเอียด ${escapeSummaryHtml(studentName)}">👁️</button>
+        </td>
+      </tr>
+    `);
+  });
+
+  tbody.off('click', '.cleaning-student-detail').on('click', '.cleaning-student-detail', function () {
+    viewCleaningStudentDetail($(this).attr('data-student-id'), $(this).attr('data-student-name'));
+  });
+}
+
+async function viewCleaningStudentDetail(studentId, studentName) {
+  const safeStudentId = String(studentId == null ? '' : studentId);
+  const safeStudentName = String(studentName == null ? '' : studentName);
+  $("#student-detail-title").text(`🧹 ${safeStudentName}`);
+  $("#student-detail-sub").text(`รหัส: ${safeStudentId} | เขตพื้นที่`);
+  $("#student-detail-modal").css('display', 'flex');
+
+  const tbody = $("#student-detail-tbody");
+  tbody.html('<tr><td colspan="3" class="text-center p-6 text-gray-400">กำลังโหลด...</td></tr>');
+
+  const startDate = $("#cleaning-summary-start").val();
+  const endDate = $("#cleaning-summary-end").val();
+
+  try {
+    const response = await runGoogleScript('getCleaningStudentDetail', safeStudentId, startDate, endDate);
+    tbody.empty();
+
+    if (response.status === 'success' && Array.isArray(response.data) && response.data.length > 0) {
+      const colorMap = {
+        'ทำ': 'bg-emerald-100 text-emerald-800',
+        'ไม่ทำ': 'bg-rose-100 text-rose-800',
+        'ลา': 'bg-blue-100 text-blue-800',
+        'หนีเวร': 'bg-amber-100 text-amber-800'
+      };
+      response.data.forEach(record => {
+        const className = colorMap[record.status] || 'bg-gray-100 text-gray-800';
+        tbody.append(`
+          <tr class="border-b border-gray-100 hover:bg-blue-50">
+            <td class="p-3 text-gray-700">${escapeSummaryHtml(record.date)}</td>
+            <td class="p-3 text-center">
+              <span class="px-3 py-1 rounded-full text-xs font-bold ${className}">${escapeSummaryHtml(record.status)}</span>
+            </td>
+            <td class="p-3 text-gray-600 text-sm">${escapeSummaryHtml(record.role || '—')}</td>
+          </tr>
+        `);
+      });
+    } else {
+      tbody.html('<tr><td colspan="3" class="text-center p-6 text-gray-400">ไม่พบข้อมูล</td></tr>');
+    }
+  } catch (error) {
+    tbody.html(`<tr><td colspan="3" class="text-center p-6 text-rose-500">${escapeSummaryHtml(error.message || error)}</td></tr>`);
   }
 }
 

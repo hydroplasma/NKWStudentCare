@@ -1117,17 +1117,29 @@ function getCleaningStats(filter, spreadsheetMode = DEFAULT_SPREADSHEET_MODE) {
     // คำนวณสถิตินักเรียน
     const studentStats = {};
     filteredAttendance.forEach(row => {
+      const roomId = String(row[1] || '').trim();
       const students = JSON.parse(row[3] || '[]');
       students.forEach(student => {
         const sid = student.student_id;
         if (!studentStats[sid]) {
-          studentStats[sid] = { student_id: sid, name: student.name || sid, total: 0, done: 0, not_done: 0, escaped: 0 };
+          studentStats[sid] = {
+            student_id: sid,
+            name: student.name || sid,
+            classroom_id: roomId,
+            total: 0, done: 0, not_done: 0, leave: 0
+          };
         }
         studentStats[sid].total++;
         if (student.status === 'ทำ') studentStats[sid].done++;
         else if (student.status === 'ไม่ทำ') studentStats[sid].not_done++;
-        else if (student.status === 'หนีเวร') studentStats[sid].escaped++;
+        else if (student.status === 'ลา' || student.status === 'หนีเวร') studentStats[sid].leave++;
       });
+    });
+
+    // เรียงตามห้อง + เลขที่
+    const allStudents = Object.values(studentStats).sort((a, b) => {
+      if (a.classroom_id !== b.classroom_id) return a.classroom_id.localeCompare(b.classroom_id);
+      return String(a.student_id).localeCompare(String(b.student_id));
     });
 
     const topStudents = Object.values(studentStats).sort((a, b) => b.done - a.done).slice(0, 5);
@@ -1163,10 +1175,57 @@ function getCleaningStats(filter, spreadsheetMode = DEFAULT_SPREADSHEET_MODE) {
     });
 
     return createResponse('success', 'Stats retrieved successfully', {
-      studentStats: Object.values(studentStats), topStudents, avgScore, scoreDetails
+      studentStats: allStudents,
+      allStudents: allStudents,
+      topStudents,
+      avgScore,
+      scoreDetails
     });
   } catch (error) {
     return createResponse('error', 'Failed to get stats: ' + error.message, null, error);
+  }
+}
+
+/**
+ * รายละเอียดรายวันของนักเรียน 1 คน (สำหรับ cleaning)
+ */
+function getCleaningStudentDetail(studentId, startDate, endDate) {
+  try {
+    const ss = getSpreadsheet();
+    const sheet = ss.getSheetByName(CLEANING_SHEET_NAMES.ATTENDANCE);
+    if (!sheet) return { status: "success", data: [] };
+
+    const cleaned = getCleanedCleaningRows(sheet.getDataRange().getValues());
+    const result = [];
+    const targetStu = String(studentId || "").trim();
+
+    cleaned.forEach(row => {
+      const rowDate = formatDateStr(row[0]);
+      const rowRoom = String(row[1] || "").trim();
+      if (startDate && rowDate < startDate) return;
+      if (endDate && rowDate > endDate) return;
+
+      let students = [];
+      try { students = JSON.parse(row[3] || '[]'); } catch (e) {}
+      if (!Array.isArray(students)) return;
+
+      const found = students.find(s => String(s.student_id) === targetStu);
+      if (found) {
+        result.push({
+          date: rowDate,
+          classroom_id: rowRoom,
+          status: found.status,
+          role: found.role || '',
+          checker: String(row[2] || '').trim()
+        });
+      }
+    });
+
+    result.sort((a, b) => b.date.localeCompare(a.date));
+    return { status: "success", data: result };
+  } catch (err) {
+    Logger.log('Error in getCleaningStudentDetail: ' + err.message);
+    return { status: "error", message: err.toString(), data: [] };
   }
 }
 
