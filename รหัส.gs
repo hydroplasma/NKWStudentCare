@@ -125,6 +125,11 @@ function getStudentAnalysisUrl() {
   return sheet.getRange('B8').getValue(); // ดึงค่า URL จาก B8
 }
 
+// ========================================
+// Sheet setup and data initialization
+// Related sheet helpers, setup routines, sample-data initializer, and risk log.
+// ========================================
+
 /**
  * Utility function to get or create sheet
  */
@@ -157,6 +162,251 @@ function getOrCreateSheet(sheetName, mode = DEFAULT_SPREADSHEET_MODE) {
   } catch (error) {
     Logger.log('Error in getOrCreateSheet: ' + error.message + '\nStack: ' + error.stack);
     throw error;
+  }
+}
+
+function setupCleaningSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  const sheetNames = {
+    ATTENDANCE: 'Cleaning_Attendance', 
+    SCORES: 'Cleaning_Scores',         
+    CRITERIA: 'Cleaning_Criteria'      
+  };
+
+  // 1. จัดการชีต Attendance
+  // ใช้ || (OR) ถ้าหาชีตไม่เจอให้สร้างใหม่ทันที เพื่อเลี่ยงการเขียนทับตัวแปร
+  const sheetAtt = ss.getSheetByName(sheetNames.ATTENDANCE) || ss.insertSheet(sheetNames.ATTENDANCE);
+  const headersAtt = ['Date', 'Classroom ID', 'Checker ID', 'Student Data', 'Updated At'];
+  sheetAtt.getRange(1, 1, 1, headersAtt.length).setValues([headersAtt])
+          .setFontWeight("bold").setBackground("#d9ead3");
+
+  // 2. จัดการชีต Scores
+  const sheetSco = ss.getSheetByName(sheetNames.SCORES) || ss.insertSheet(sheetNames.SCORES);
+  const headersSco = ['Date', 'Classroom ID', 'Checker ID', 'Scores', 'Total Score', 'Updated At'];
+  sheetSco.getRange(1, 1, 1, headersSco.length).setValues([headersSco])
+          .setFontWeight("bold").setBackground("#c9daf8");
+
+  // 3. จัดการชีต Criteria
+  let sheetCri = ss.getSheetByName(sheetNames.CRITERIA);
+  if (!sheetCri) {
+    sheetCri = ss.insertSheet(sheetNames.CRITERIA);
+    // สร้างข้อมูลเกณฑ์ตั้งต้น
+    const criteriaData = [
+      ['ID', 'Name', 'Max Score'],
+      ['C01', 'กวาดพื้น/ถูพื้น', 10],
+      ['C02', 'ทิ้งขยะ', 5],
+      ['C03', 'ความเป็นระเบียบ', 5]
+    ];
+    sheetCri.getRange(1, 1, criteriaData.length, criteriaData[0].length).setValues(criteriaData);
+    sheetCri.getRange(1, 1, 1, criteriaData[0].length).setFontWeight("bold").setBackground("#fff2cc");
+  } else {
+    // ถ้ามีอยู่แล้วแค่เขียนหัวตาราง
+    const headersCri = ['ID', 'Name', 'Max Score'];
+    sheetCri.getRange(1, 1, 1, headersCri.length).setValues([headersCri])
+            .setFontWeight("bold").setBackground("#fff2cc");
+  }
+
+  console.log('✅ สร้างชีตและหัวตารางสำเร็จ!');
+}
+
+// ฟังก์ชันสำหรับสร้างฐานข้อมูลระบบเช็คชื่อรายวิชา (รันเพียงครั้งเดียว)
+function setupSubjectDatabase() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+  
+  try {
+    // ---------------------------------------------------------
+    // 1. สร้างชีต Timetable (ตารางสอน)
+    // ---------------------------------------------------------
+    var timetableSheet = ss.getSheetByName("Timetable");
+    if (!timetableSheet) {
+      timetableSheet = ss.insertSheet("Timetable");
+      var timetableHeaders = [
+        "TimetableID", "DayOfWeek", "Period", "SubjectCode", "SubjectName", 
+        "TeacherEmail", "GradeLevel", "Room", "ClassroomId"
+      ];
+      timetableSheet.appendRow(timetableHeaders);
+      
+      // จัดรูปแบบหัวตารางให้สวยงาม
+      timetableSheet.getRange(1, 1, 1, timetableHeaders.length)
+        .setFontWeight("bold")
+        .setBackground("#f9cb9c") // สีส้มอ่อน
+        .setHorizontalAlignment("center");
+        
+      // ตรึงแถวบนสุด
+      timetableSheet.setFrozenRows(1);
+      
+      // เพิ่มข้อมูลตัวอย่าง 1 บรรทัด เพื่อให้ครูดูเป็นแนวทาง
+      var exampleTeacherEmail = Session.getActiveUser().getEmail() || "teacher@namkham.ac.th";
+      timetableSheet.appendRow([
+        "T001", "จันทร์", 1, "ว23101", "วิทยาศาสตร์", 
+        exampleTeacherEmail, "ม.3", "1", "m3_1"
+      ]);
+      
+      // ปรับขนาดคอลัมน์อัตโนมัติ
+      timetableSheet.autoResizeColumns(1, timetableHeaders.length);
+    }
+
+    // ---------------------------------------------------------
+    // 2. สร้างชีต Attendance_Subjects (บันทึกผลการเข้าเรียน)
+    // ---------------------------------------------------------
+    var attendanceSheet = ss.getSheetByName("Attendance_Subjects");
+    if (!attendanceSheet) {
+      attendanceSheet = ss.insertSheet("Attendance_Subjects");
+      var attendanceHeaders = [
+        "Timestamp", "Date", "SubjectCode", "SubjectName", "TeacherEmail", 
+        "GradeLevel", "Room", "StudentID", "StudentName", "Status", "Note"
+      ];
+      attendanceSheet.appendRow(attendanceHeaders);
+      
+      // จัดรูปแบบหัวตารางให้สวยงาม
+      attendanceSheet.getRange(1, 1, 1, attendanceHeaders.length)
+        .setFontWeight("bold")
+        .setBackground("#d9ead3") // สีเขียวอ่อน
+        .setHorizontalAlignment("center");
+        
+      // ตรึงแถวบนสุด
+      attendanceSheet.setFrozenRows(1);
+      
+      // ปรับขนาดคอลัมน์อัตโนมัติ
+      attendanceSheet.autoResizeColumns(1, attendanceHeaders.length);
+    }
+    
+    ui.alert('✅ สำเร็จ!', 'สร้างชีต "Timetable" และ "Attendance_Subjects" เรียบร้อยแล้ว\n\nกรุณาไปที่ Google Sheets เพื่อแก้ไขข้อมูลตารางสอนตัวอย่างให้เป็นข้อมูลจริงครับ', ui.ButtonSet.OK);
+    
+  } catch (error) {
+    ui.alert('❌ เกิดข้อผิดพลาด', error.toString(), ui.ButtonSet.OK);
+  }
+}
+
+// Create sample data
+function createSampleData(spreadsheetMode = DEFAULT_SPREADSHEET_MODE) {
+  // ฟังก์ชันเดิม ไม่เปลี่ยนแปลง
+  try {
+    const lock = LockService.getScriptLock();
+    if (!lock.tryLock(10000)) {
+      return createResponse('error', 'Server is busy, please try again', null, { code: 'LOCK_TIMEOUT' });
+    }
+
+    try {
+      // Config
+      const configSheet = getOrCreateSheet(SHEET_NAMES.CONFIG, spreadsheetMode);
+      configSheet.getDataRange().clearContent();
+      configSheet.getRange(1, 1, 1, HEADERS[SHEET_NAMES.CONFIG].length).setValues([HEADERS[SHEET_NAMES.CONFIG]]);
+      const configData = [
+        ['logoUrl', 'https://i.postimg.cc/RZ0PCqVy/NKW-LOGO.png'],
+        ['systemName', 'ระบบเช็คชื่อนักเรียน โรงเรียนน้ำคำวิทยา'],
+        ['systemAdmin', '© 2025 Waiwai IT & KruBlackThawatchai'],
+        ['schoolName', 'โรงเรียนน้ำคำวิทยา'],
+        ['semester', 'ภาคเรียนที่ 1'],
+        ['schoolYear', '2569']
+      ];
+      configSheet.getRange(2, 1, configData.length, configData[0].length).setValues(configData);
+
+      // StatusList
+      const statusSheet = getOrCreateSheet(SHEET_NAMES.STATUS_LIST, spreadsheetMode);
+      statusSheet.getDataRange().clearContent();
+      statusSheet.getRange(1, 1, 1, HEADERS[SHEET_NAMES.STATUS_LIST].length).setValues([HEADERS[SHEET_NAMES.STATUS_LIST]]);
+      const statusData = [
+        ['มา', 'bg-green-100', '#4ade80', 1],
+        ['ขาด', 'bg-red-100', '#f87171', 1],
+        ['สาย', 'bg-yellow-100', '#facc15', 1],
+        ['ลา', 'bg-blue-100', '#60a5fa', 1],
+        ['ป่วย', 'bg-purple-100', '#c084fc', 1]
+      ];
+      statusSheet.getRange(2, 1, statusData.length, statusData[0].length).setValues(statusData);
+
+      // Teachers
+const teachersSheet = getOrCreateSheet(SHEET_NAMES.TEACHERS, spreadsheetMode);
+teachersSheet.getDataRange().clearContent();
+teachersSheet.getRange(1, 1, 1, HEADERS[SHEET_NAMES.TEACHERS].length).setValues([HEADERS[SHEET_NAMES.TEACHERS]]);
+// ✅ ไม่สร้างครูตัวอย่าง — ให้แอดมินเพิ่มครูจริงในชีตเอง
+
+      // Periods
+      const periodsSheet = getOrCreateSheet(SHEET_NAMES.PERIODS, spreadsheetMode);
+      periodsSheet.getDataRange().clearContent();
+      periodsSheet.getRange(1, 1, 1, HEADERS[SHEET_NAMES.PERIODS].length).setValues([HEADERS[SHEET_NAMES.PERIODS]]);
+      const periodsData = [
+        ['morning', 'เช้า', 1],
+        ['noon', 'เที่ยง', 1],
+        ['evening', 'เย็น', 1]
+      ];
+      periodsSheet.getRange(2, 1, periodsData.length, periodsData[0].length).setValues(periodsData);
+
+      // Classrooms
+      const classroomsSheet = getOrCreateSheet(SHEET_NAMES.CLASSROOMS, spreadsheetMode);
+      classroomsSheet.getDataRange().clearContent();
+      classroomsSheet.getRange(1, 1, 1, HEADERS[SHEET_NAMES.CLASSROOMS].length).setValues([HEADERS[SHEET_NAMES.CLASSROOMS]]);
+      const classroomsData = [
+        ['m1-1', 'ม.1/1', 1],
+        ['m2-1', 'ม.2/1', 1]
+      ];
+      classroomsSheet.getRange(2, 1, classroomsData.length, classroomsData[0].length).setValues(classroomsData);
+
+      // Students
+      const studentsSheet = getOrCreateSheet(SHEET_NAMES.STUDENTS, spreadsheetMode);
+      studentsSheet.getDataRange().clearContent();
+      studentsSheet.getRange(1, 1, 1, HEADERS[SHEET_NAMES.STUDENTS].length).setValues([HEADERS[SHEET_NAMES.STUDENTS]]);
+      const studentsData = [
+        ['m1-1', '11201', 1, 'เด็กชายภูวดล ใจดี', 1],
+        ['m1-1', '11202', 2, 'เด็กหญิงนลิน ใจงาม', 1],
+        ['m2-1', '12201', 1, 'เด็กชายสมศักดิ์ รักเรียน', 1],
+        ['m2-1', '12202', 2, 'เด็กหญิงสมหญิง เรียนดี', 1]
+      ];
+      studentsSheet.getRange(2, 1, studentsData.length, studentsData[0].length).setValues(studentsData);
+
+      return createResponse('success', 'Sample data created successfully');
+    } finally {
+      lock.releaseLock();
+    }
+  } catch (error) {
+    Logger.log('Error in createSampleData: ' + error.message + '\nStack: ' + error.stack);
+    return createResponse('error', 'Failed to create sample data: ' + error.message, null, error);
+  }
+}
+
+/**
+ * บันทึกเฉพาะการสร้างเอกสารพิมพ์ ไม่ได้บันทึกการออกหนังสือหรือการติดต่อผู้ปกครอง
+ * เพิ่มแถวใหม่เท่านั้น; ไม่แก้ไขหรือลบรายการเดิม
+ */
+function logRiskDocumentGeneration(documentType, studentId, startDate, endDate, documentNo, actorName) {
+  let lock;
+  let lockAcquired = false;
+  try {
+    const allowedTypes = ['warning', 'activity', 'summary'];
+    const type = String(documentType || '').trim();
+    if (allowedTypes.indexOf(type) === -1) return { status: 'error', message: 'ประเภทเอกสารไม่ถูกต้อง' };
+
+    const start = String(startDate || '').trim();
+    const end = String(endDate || '').trim();
+    const validDate = function(value) { return !value || /^\d{4}-\d{2}-\d{2}$/.test(value); };
+    if (!validDate(start) || !validDate(end) || (start && end && start > end)) {
+      return { status: 'error', message: 'ช่วงวันที่ประเมินไม่ถูกต้อง' };
+    }
+
+    const lockService = LockService.getScriptLock();
+    lock = lockService;
+    if (!lock.tryLock(10000)) return { status: 'error', message: 'Server busy' };
+    lockAcquired = true;
+
+    const sheet = getOrCreateSheet(RISK_ACTION_LOG_SHEET_NAME);
+    sheet.appendRow([
+      new Date(),
+      'สร้างเอกสาร',
+      type,
+      String(studentId || '').trim().slice(0, 100),
+      start,
+      end,
+      String(documentNo || '').trim().slice(0, 150),
+      String(actorName || '').trim().slice(0, 150)
+    ]);
+    return { status: 'success', message: 'บันทึกการสร้างเอกสารแล้ว' };
+  } catch (err) {
+    Logger.log('Error in logRiskDocumentGeneration: ' + (err.message || err));
+    return { status: 'error', message: err.message || String(err) };
+  } finally {
+    if (lock && lockAcquired) lock.releaseLock();
   }
 }
 
@@ -597,92 +847,6 @@ function getInitialData(spreadsheetMode = DEFAULT_SPREADSHEET_MODE) {
   } catch (error) {
     Logger.log('Error in getInitialData: ' + error.message + '\nStack: ' + error.stack);
     return createResponse('error', 'Failed to get initial data: ' + error.message, null, error);
-  }
-}
-
-// Create sample data
-function createSampleData(spreadsheetMode = DEFAULT_SPREADSHEET_MODE) {
-  // ฟังก์ชันเดิม ไม่เปลี่ยนแปลง
-  try {
-    const lock = LockService.getScriptLock();
-    if (!lock.tryLock(10000)) {
-      return createResponse('error', 'Server is busy, please try again', null, { code: 'LOCK_TIMEOUT' });
-    }
-
-    try {
-      // Config
-      const configSheet = getOrCreateSheet(SHEET_NAMES.CONFIG, spreadsheetMode);
-      configSheet.getDataRange().clearContent();
-      configSheet.getRange(1, 1, 1, HEADERS[SHEET_NAMES.CONFIG].length).setValues([HEADERS[SHEET_NAMES.CONFIG]]);
-      const configData = [
-        ['logoUrl', 'https://i.postimg.cc/RZ0PCqVy/NKW-LOGO.png'],
-        ['systemName', 'ระบบเช็คชื่อนักเรียน โรงเรียนน้ำคำวิทยา'],
-        ['systemAdmin', '© 2025 Waiwai IT & KruBlackThawatchai'],
-        ['schoolName', 'โรงเรียนน้ำคำวิทยา'],
-        ['semester', 'ภาคเรียนที่ 1'],
-        ['schoolYear', '2569']
-      ];
-      configSheet.getRange(2, 1, configData.length, configData[0].length).setValues(configData);
-
-      // StatusList
-      const statusSheet = getOrCreateSheet(SHEET_NAMES.STATUS_LIST, spreadsheetMode);
-      statusSheet.getDataRange().clearContent();
-      statusSheet.getRange(1, 1, 1, HEADERS[SHEET_NAMES.STATUS_LIST].length).setValues([HEADERS[SHEET_NAMES.STATUS_LIST]]);
-      const statusData = [
-        ['มา', 'bg-green-100', '#4ade80', 1],
-        ['ขาด', 'bg-red-100', '#f87171', 1],
-        ['สาย', 'bg-yellow-100', '#facc15', 1],
-        ['ลา', 'bg-blue-100', '#60a5fa', 1],
-        ['ป่วย', 'bg-purple-100', '#c084fc', 1]
-      ];
-      statusSheet.getRange(2, 1, statusData.length, statusData[0].length).setValues(statusData);
-
-      // Teachers
-const teachersSheet = getOrCreateSheet(SHEET_NAMES.TEACHERS, spreadsheetMode);
-teachersSheet.getDataRange().clearContent();
-teachersSheet.getRange(1, 1, 1, HEADERS[SHEET_NAMES.TEACHERS].length).setValues([HEADERS[SHEET_NAMES.TEACHERS]]);
-// ✅ ไม่สร้างครูตัวอย่าง — ให้แอดมินเพิ่มครูจริงในชีตเอง
-
-      // Periods
-      const periodsSheet = getOrCreateSheet(SHEET_NAMES.PERIODS, spreadsheetMode);
-      periodsSheet.getDataRange().clearContent();
-      periodsSheet.getRange(1, 1, 1, HEADERS[SHEET_NAMES.PERIODS].length).setValues([HEADERS[SHEET_NAMES.PERIODS]]);
-      const periodsData = [
-        ['morning', 'เช้า', 1],
-        ['noon', 'เที่ยง', 1],
-        ['evening', 'เย็น', 1]
-      ];
-      periodsSheet.getRange(2, 1, periodsData.length, periodsData[0].length).setValues(periodsData);
-
-      // Classrooms
-      const classroomsSheet = getOrCreateSheet(SHEET_NAMES.CLASSROOMS, spreadsheetMode);
-      classroomsSheet.getDataRange().clearContent();
-      classroomsSheet.getRange(1, 1, 1, HEADERS[SHEET_NAMES.CLASSROOMS].length).setValues([HEADERS[SHEET_NAMES.CLASSROOMS]]);
-      const classroomsData = [
-        ['m1-1', 'ม.1/1', 1],
-        ['m2-1', 'ม.2/1', 1]
-      ];
-      classroomsSheet.getRange(2, 1, classroomsData.length, classroomsData[0].length).setValues(classroomsData);
-
-      // Students
-      const studentsSheet = getOrCreateSheet(SHEET_NAMES.STUDENTS, spreadsheetMode);
-      studentsSheet.getDataRange().clearContent();
-      studentsSheet.getRange(1, 1, 1, HEADERS[SHEET_NAMES.STUDENTS].length).setValues([HEADERS[SHEET_NAMES.STUDENTS]]);
-      const studentsData = [
-        ['m1-1', '11201', 1, 'เด็กชายภูวดล ใจดี', 1],
-        ['m1-1', '11202', 2, 'เด็กหญิงนลิน ใจงาม', 1],
-        ['m2-1', '12201', 1, 'เด็กชายสมศักดิ์ รักเรียน', 1],
-        ['m2-1', '12202', 2, 'เด็กหญิงสมหญิง เรียนดี', 1]
-      ];
-      studentsSheet.getRange(2, 1, studentsData.length, studentsData[0].length).setValues(studentsData);
-
-      return createResponse('success', 'Sample data created successfully');
-    } finally {
-      lock.releaseLock();
-    }
-  } catch (error) {
-    Logger.log('Error in createSampleData: ' + error.message + '\nStack: ' + error.stack);
-    return createResponse('error', 'Failed to create sample data: ' + error.message, null, error);
   }
 }
 
@@ -1417,51 +1581,6 @@ function getWeeklyAttendanceByRoom(weekDates, period, spreadsheetMode = DEFAULT_
     return createResponse('error', 'Failed to get weekly status: ' + error.message, null, error);
   }
 }
-function setupCleaningSheets() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-
-  const sheetNames = {
-    ATTENDANCE: 'Cleaning_Attendance', 
-    SCORES: 'Cleaning_Scores',         
-    CRITERIA: 'Cleaning_Criteria'      
-  };
-
-  // 1. จัดการชีต Attendance
-  // ใช้ || (OR) ถ้าหาชีตไม่เจอให้สร้างใหม่ทันที เพื่อเลี่ยงการเขียนทับตัวแปร
-  const sheetAtt = ss.getSheetByName(sheetNames.ATTENDANCE) || ss.insertSheet(sheetNames.ATTENDANCE);
-  const headersAtt = ['Date', 'Classroom ID', 'Checker ID', 'Student Data', 'Updated At'];
-  sheetAtt.getRange(1, 1, 1, headersAtt.length).setValues([headersAtt])
-          .setFontWeight("bold").setBackground("#d9ead3");
-
-  // 2. จัดการชีต Scores
-  const sheetSco = ss.getSheetByName(sheetNames.SCORES) || ss.insertSheet(sheetNames.SCORES);
-  const headersSco = ['Date', 'Classroom ID', 'Checker ID', 'Scores', 'Total Score', 'Updated At'];
-  sheetSco.getRange(1, 1, 1, headersSco.length).setValues([headersSco])
-          .setFontWeight("bold").setBackground("#c9daf8");
-
-  // 3. จัดการชีต Criteria
-  let sheetCri = ss.getSheetByName(sheetNames.CRITERIA);
-  if (!sheetCri) {
-    sheetCri = ss.insertSheet(sheetNames.CRITERIA);
-    // สร้างข้อมูลเกณฑ์ตั้งต้น
-    const criteriaData = [
-      ['ID', 'Name', 'Max Score'],
-      ['C01', 'กวาดพื้น/ถูพื้น', 10],
-      ['C02', 'ทิ้งขยะ', 5],
-      ['C03', 'ความเป็นระเบียบ', 5]
-    ];
-    sheetCri.getRange(1, 1, criteriaData.length, criteriaData[0].length).setValues(criteriaData);
-    sheetCri.getRange(1, 1, 1, criteriaData[0].length).setFontWeight("bold").setBackground("#fff2cc");
-  } else {
-    // ถ้ามีอยู่แล้วแค่เขียนหัวตาราง
-    const headersCri = ['ID', 'Name', 'Max Score'];
-    sheetCri.getRange(1, 1, 1, headersCri.length).setValues([headersCri])
-            .setFontWeight("bold").setBackground("#fff2cc");
-  }
-
-  console.log('✅ สร้างชีตและหัวตารางสำเร็จ!');
-}
-
 /**
  * Helper: แปลงวันที่ให้เป็น yyyy-MM-dd เสมอ
  */
@@ -1828,75 +1947,6 @@ function getTeacherSubjectsList(teacherIdentifier) {
   });
   
   return { status: "success", data: result };
-}
-// ฟังก์ชันสำหรับสร้างฐานข้อมูลระบบเช็คชื่อรายวิชา (รันเพียงครั้งเดียว)
-function setupSubjectDatabase() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var ui = SpreadsheetApp.getUi();
-  
-  try {
-    // ---------------------------------------------------------
-    // 1. สร้างชีต Timetable (ตารางสอน)
-    // ---------------------------------------------------------
-    var timetableSheet = ss.getSheetByName("Timetable");
-    if (!timetableSheet) {
-      timetableSheet = ss.insertSheet("Timetable");
-      var timetableHeaders = [
-        "TimetableID", "DayOfWeek", "Period", "SubjectCode", "SubjectName", 
-        "TeacherEmail", "GradeLevel", "Room", "ClassroomId"
-      ];
-      timetableSheet.appendRow(timetableHeaders);
-      
-      // จัดรูปแบบหัวตารางให้สวยงาม
-      timetableSheet.getRange(1, 1, 1, timetableHeaders.length)
-        .setFontWeight("bold")
-        .setBackground("#f9cb9c") // สีส้มอ่อน
-        .setHorizontalAlignment("center");
-        
-      // ตรึงแถวบนสุด
-      timetableSheet.setFrozenRows(1);
-      
-      // เพิ่มข้อมูลตัวอย่าง 1 บรรทัด เพื่อให้ครูดูเป็นแนวทาง
-      var exampleTeacherEmail = Session.getActiveUser().getEmail() || "teacher@namkham.ac.th";
-      timetableSheet.appendRow([
-        "T001", "จันทร์", 1, "ว23101", "วิทยาศาสตร์", 
-        exampleTeacherEmail, "ม.3", "1", "m3_1"
-      ]);
-      
-      // ปรับขนาดคอลัมน์อัตโนมัติ
-      timetableSheet.autoResizeColumns(1, timetableHeaders.length);
-    }
-
-    // ---------------------------------------------------------
-    // 2. สร้างชีต Attendance_Subjects (บันทึกผลการเข้าเรียน)
-    // ---------------------------------------------------------
-    var attendanceSheet = ss.getSheetByName("Attendance_Subjects");
-    if (!attendanceSheet) {
-      attendanceSheet = ss.insertSheet("Attendance_Subjects");
-      var attendanceHeaders = [
-        "Timestamp", "Date", "SubjectCode", "SubjectName", "TeacherEmail", 
-        "GradeLevel", "Room", "StudentID", "StudentName", "Status", "Note"
-      ];
-      attendanceSheet.appendRow(attendanceHeaders);
-      
-      // จัดรูปแบบหัวตารางให้สวยงาม
-      attendanceSheet.getRange(1, 1, 1, attendanceHeaders.length)
-        .setFontWeight("bold")
-        .setBackground("#d9ead3") // สีเขียวอ่อน
-        .setHorizontalAlignment("center");
-        
-      // ตรึงแถวบนสุด
-      attendanceSheet.setFrozenRows(1);
-      
-      // ปรับขนาดคอลัมน์อัตโนมัติ
-      attendanceSheet.autoResizeColumns(1, attendanceHeaders.length);
-    }
-    
-    ui.alert('✅ สำเร็จ!', 'สร้างชีต "Timetable" และ "Attendance_Subjects" เรียบร้อยแล้ว\n\nกรุณาไปที่ Google Sheets เพื่อแก้ไขข้อมูลตารางสอนตัวอย่างให้เป็นข้อมูลจริงครับ', ui.ButtonSet.OK);
-    
-  } catch (error) {
-    ui.alert('❌ เกิดข้อผิดพลาด', error.toString(), ui.ButtonSet.OK);
-  }
 }
 /**
  * ดึงรายชื่อนักเรียนของห้องเรียนหนึ่งๆ (ใช้โดย subject_attendance.html)
@@ -2844,49 +2894,5 @@ function getStudentRiskHistory(studentId, weeksBack, classroomFilter) {
   } catch (err) {
     Logger.log('Error in getStudentRiskHistory: ' + err.message);
     return { status: 'error', message: err.toString() };
-  }
-}
-
-/**
- * บันทึกเฉพาะการสร้างเอกสารพิมพ์ ไม่ได้บันทึกการออกหนังสือหรือการติดต่อผู้ปกครอง
- * เพิ่มแถวใหม่เท่านั้น; ไม่แก้ไขหรือลบรายการเดิม
- */
-function logRiskDocumentGeneration(documentType, studentId, startDate, endDate, documentNo, actorName) {
-  let lock;
-  let lockAcquired = false;
-  try {
-    const allowedTypes = ['warning', 'activity', 'summary'];
-    const type = String(documentType || '').trim();
-    if (allowedTypes.indexOf(type) === -1) return { status: 'error', message: 'ประเภทเอกสารไม่ถูกต้อง' };
-
-    const start = String(startDate || '').trim();
-    const end = String(endDate || '').trim();
-    const validDate = function(value) { return !value || /^\d{4}-\d{2}-\d{2}$/.test(value); };
-    if (!validDate(start) || !validDate(end) || (start && end && start > end)) {
-      return { status: 'error', message: 'ช่วงวันที่ประเมินไม่ถูกต้อง' };
-    }
-
-    const lockService = LockService.getScriptLock();
-    lock = lockService;
-    if (!lock.tryLock(10000)) return { status: 'error', message: 'Server busy' };
-    lockAcquired = true;
-
-    const sheet = getOrCreateSheet(RISK_ACTION_LOG_SHEET_NAME);
-    sheet.appendRow([
-      new Date(),
-      'สร้างเอกสาร',
-      type,
-      String(studentId || '').trim().slice(0, 100),
-      start,
-      end,
-      String(documentNo || '').trim().slice(0, 150),
-      String(actorName || '').trim().slice(0, 150)
-    ]);
-    return { status: 'success', message: 'บันทึกการสร้างเอกสารแล้ว' };
-  } catch (err) {
-    Logger.log('Error in logRiskDocumentGeneration: ' + (err.message || err));
-    return { status: 'error', message: err.message || String(err) };
-  } finally {
-    if (lock && lockAcquired) lock.releaseLock();
   }
 }
