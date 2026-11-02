@@ -99,10 +99,13 @@
 
     function loadInitialData() {
       google.script.run.withSuccessHandler(function(url) {
-        if (url) {
-          document.getElementById('student-analysis-link').href = url;
-        } else {
-          document.getElementById('student-analysis-link').style.display = 'none';
+        const linkElement = document.getElementById('student-analysis-link');
+        if (linkElement) {
+          if (url) {
+            linkElement.href = url;
+          } else {
+            linkElement.style.display = 'none';
+          }
         }
       }).getStudentAnalysisUrl();
     }
@@ -513,6 +516,9 @@
             const allowedClassroomIds = teacher && teacher.classroom_ids
                 ? Array.isArray(teacher.classroom_ids) ? teacher.classroom_ids : teacher.classroom_ids.split(',').map(id => id.trim())
                 : [];
+            
+            // เช็คว่าเป็น Admin หรือไม่ (ถ้าไม่มี classroom_ids ถือเป็น Admin)
+            const isAdmin = !teacher || !teacher.classroom_ids;
 
             if (!ALL_CLASSROOMS || ALL_CLASSROOMS.length === 0) {
                 await loadAllClassroomsAndStudents();
@@ -530,39 +536,49 @@
                 return;
             }
 
+            // 1. ดึงข้อมูลการเช็คชื่อของวันปัจจุบัน
             const attendanceResponse = await runGoogleScript('getAttendance', date, period, null);
             if (attendanceResponse.status !== 'success') {
                 throw new Error(attendanceResponse.error?.details || 'Failed to load attendance data');
             }
             const attendanceLog = attendanceResponse.data;
 
+            // 2. 💡 [เพิ่มใหม่] หาวันที่ จันทร์ - ศุกร์ ของสัปดาห์ที่เลือก เพื่อดึงสถานะรายสัปดาห์
+            const weekDates = getWeekDates(date);
+            const weeklyResponse = await runGoogleScript('getWeeklyAttendanceByRoom', weekDates, period);
+            
+            // 💡 แก้ไขบรรทัดนี้ให้ดึงเฉพาะ .data ออกมาใช้งาน
+            const statusMap = (weeklyResponse.status === 'success') ? weeklyResponse.data : {};
+
             const classroomsList = $("#classrooms-list");
             classroomsList.empty();
 
-            // ใช้ Web Worker
+            // ใช้ Web Worker ประมวลผลข้อมูลรายวันเหมือนเดิม
             tableWorker.onmessage = function(e) {
                 const { tableData, statusCounts, totalStudents } = e.data;
                 const fragment = document.createDocumentFragment();
 
                 tableData.forEach((entry, index) => {
-                    const checkStatus = entry.checked
-                        ? `<svg class="w-6 h-6 text-green-600 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>`
-                        : `<svg class="w-6 h-6 text-red-600 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>`;
-                    
+                    // เรียกใช้งานฟังก์ชันสร้างแถบ จ.-ศ. ทั้งหมด (ส่งชื่อห้องและสิทธิ์ไปครบถ้วน)
+                    const weeklyStatusHtml = buildWeeklyStatusHtml(entry.classroomId, entry.classroom, weekDates, statusMap, entry.isResponsible);
+
                     const actionCell = entry.isResponsible
                         ? `
                             <button class="check-attendance-btn px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl shadow-md hover:shadow-lg text-sm font-bold active:scale-95 transition"
                                     data-classroom-id="${entry.classroomId}" data-classroom-name="${entry.classroom}">
-                                เช็คชื่อ
+                                เช็คชื่อประจำวัน
                             </button>
                         `
                         : '';
+                    
                     const row = document.createElement('tr');
                     row.className = `hover:bg-blue-50 transition-colors border-b border-gray-100`;
+                    
+                    // จัดเรียงคอลัมน์ใหม่: ตัดคอลัมน์เครื่องหมายเดี่ยวออก เหลือแสดงแถบ จ.-ศ. ยาวไปเลย
                     row.innerHTML = `
                         <td class="px-4 py-4 text-left font-bold text-gray-700">${entry.classroom}</td>
                         <td class="px-4 py-4 text-center text-gray-500">${entry.studentCount}</td>
-                        <td class="px-4 py-4">${checkStatus}</td>
+                        <td class="px-4 py-4 text-center">${weeklyStatusHtml}</td>
                         <td class="px-4 py-4 text-center">${actionCell}</td>
                     `;
                     fragment.appendChild(row);
@@ -740,14 +756,14 @@
     function openCleaningModal() {
         if ($('#cleaning-modal').length === 0) {
             $('body').append(`
-                <div id="cleaning-modal" class="modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; overflow:hidden; background-color:rgba(0,0,0,0.5); align-items:center; justify-content:center;">
-                    <div class="modal-content" style="background-color:#f3f4f6; margin:auto; padding:0; border:1px solid #888; width:95%; height:95%; max-width:1200px; border-radius:12px; display:flex; flex-direction:column; overflow:hidden;">
-                        <div class="flex justify-between items-center p-4 bg-indigo-600 text-white shadow-md">
-                            <h2 class="text-xl font-bold flex items-center">ระบบเขตพื้นที่</h2>
-                            <button class="text-white text-3xl font-bold focus:outline-none" onclick="$('#cleaning-modal').hide()">&times;</button>
+                <div id="cleaning-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" style="display:none;">
+                    <div class="app-card w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden bg-white shadow-2xl rounded-3xl">
+                        <div class="flex justify-between items-center p-5 bg-gray-900 text-white">
+                            <h2 class="text-lg font-bold">ระบบเขตพื้นที่</h2>
+                            <button type="button" class="text-gray-400 hover:text-white text-2xl font-bold leading-none" onclick="$('#cleaning-modal').hide()">×</button>
                         </div>
-                        <div class="relative flex-grow w-full h-full">
-                             <iframe id="cleaning-frame" style="width:100%; height:100%; border:none;"></iframe>
+                        <div class="relative flex-grow w-full h-[80vh]">
+                             <iframe id="cleaning-frame" class="w-full h-full border-none"></iframe>
                         </div>
                     </div>
                 </div>
@@ -764,23 +780,29 @@
                 doc.write(html);
                 doc.close();
 
-                setTimeout(() => {
-                    try {
-                        const teacherData = localStorage.getItem('teacher');
-                        if(teacherData && frame.contentWindow) {
-                            frame.contentWindow.localStorage.setItem('teacher', teacherData);
-                            if(frame.contentWindow.CURRENT_USER) {
-                                frame.contentWindow.CURRENT_USER = JSON.parse(teacherData);
-                                if(frame.contentWindow.$) {
-                                    frame.contentWindow.$('#checkerName').text(JSON.parse(teacherData).name);
-                                }
+                // 💡 [เพิ่มระบบหน่วงเวลาและดักจับความพร้อมของ google object ให้ iframe]
+                let checkReady = setInterval(() => {
+                    if (frame.contentWindow && frame.contentWindow.google && frame.contentWindow.google.script) {
+                        clearInterval(checkReady);
+                        try {
+                            const teacherData = localStorage.getItem('teacher');
+                            if(teacherData) {
+                                frame.contentWindow.localStorage.setItem('teacher', teacherData);
                             }
-                        }
-                    } catch(e) { console.error("Error passing user data to iframe", e); }
-                }, 500);
+                        } catch(e) { console.error("Error passing user data", e); }
+                        
+                        $.LoadingOverlay("hide");
+                        $('#cleaning-modal').css('display', 'flex');
+                    }
+                }, 100);
 
-                $.LoadingOverlay("hide");
-                $('#cleaning-modal').css('display', 'flex');
+                // ป้องกันกรณีโหลดนานเกิน 5 วินาที ให้บังคับแสดงผลหน้าต่างทันที
+                setTimeout(() => {
+                    clearInterval(checkReady);
+                    $.LoadingOverlay("hide");
+                    $('#cleaning-modal').css('display', 'flex');
+                }, 5000);
+
             })
             .withFailureHandler(function(err){
                 $.LoadingOverlay("hide");
@@ -1092,4 +1114,176 @@
             console.error('Initialization error:', error);
         }
     });
+    // 1. ฟังก์ชันหาวันที่ จันทร์ - ศุกร์ จากวันที่เลือก
+function getWeekDates(selectedDate) {
+  const curr = new Date(selectedDate);
+  const dayOfWeek = curr.getDay();
+  // ปรับให้อยู่วันจันทร์เสมอ
+  const first = curr.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); 
+  const weekDates = [];
+  for (let i = 0; i < 5; i++) {
+    const d = new Date(curr.setDate(first + i));
+    const localDate = new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+    weekDates.push(localDate);
+  }
+  return weekDates;
+}
+
+// 2. ฟังก์ชันวาดแถบสถานะ จ. - ศ. (ตามรูป)
+function buildWeeklyStatusHtml(roomId, classroomName, weekDates, statusMap, isResponsible) {
+  // ถ้าครูไม่มีสิทธิ์รับผิดชอบห้องนี้ ไม่ต้องแสดงแถบสถานะใดๆ ตามปกติ
+  if (!isResponsible) {
+    return '';
+  }
+
+  const dayNames = ['จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.'];
+  let html = '<div class="flex items-center space-x-2 text-sm font-medium justify-center">';
+  
+  weekDates.forEach((date, index) => {
+    // เช็คว่าใน statusMap มีข้อมูลของห้องนี้ และ วันนี้ หรือยัง
+    const isChecked = statusMap[roomId] && statusMap[roomId][date];
+    
+    // กำหนดรูปแบบเมื่อเอาเมาส์ชี้ (cursor-pointer และ hover) เพื่อให้รู้ว่าคลิกได้
+    const clickableStyle = `cursor: pointer; transition: transform 0.1s;`
+    const hoverAttr = `onmouseover="this.style.transform='scale(1.2)'" onmouseout="this.style.transform='scale(1)'"`;
+    
+    // เมื่อคลิกที่สัญลักษณ์ของวันใด จะเรียกฟังก์ชันพาไปเช็คชื่อย้อนหลังของวันนั้น
+    const clickAction = `onclick="goToDateAndCheck('${date}', '${roomId}', '${classroomName}')"`;
+
+    if (isChecked) {
+      // เช็คแล้ว (สีเขียว ✓ พร้อมคลิกแก้ไของค์ประกอบได้)
+      html += `<span class="text-gray-700 select-none" title="คลิกเพื่อดู/แก้ไขการเช็คชื่อวันที่ ${date}" ${clickAction} ${hoverAttr} style="${clickableStyle}">${dayNames[index]}<span class="text-green-500 font-bold ml-0.5">✓</span></span>`;
+    } else {
+      // ยังไม่เช็ค (สีแดง ⚡ คลิกเพื่อย้อนไปเช็คได้ทันที)
+      html += `<span class="text-gray-700 select-none" title="ยังไม่ได้เช็ค! คลิกเพื่อย้อนกลับไปเช็คชื่อวันที่ ${date}" ${clickAction} ${hoverAttr} style="${clickableStyle}">${dayNames[index]}<span class="text-red-500 font-bold ml-0.5">⚡</span></span>`;
+    }
+  });
+  
+  html += '</div>';
+  return html;
+}
+// ฟังก์ชันสำหรับคลิกที่วัน จ.-ศ. ในแถว เพื่อเปลี่ยนวันที่เป็นวันนั้นแล้วเปิดหน้าเช็คชื่อทันที
+function goToDateAndCheck(dateStr, classroomId, classroomName) {
+  // 1. เปลี่ยนค่าในช่องเลือกวันที่ (Attendance Date) ให้เป็นวันที่คลิก
+  $("#attendance-date").val(dateStr);
+  saveSelectedDate("attendance-date", dateStr);
+  
+  // อัปเดตตัวเลือกวันที่ในปฏิทิน Flatpickr (ถ้ามี)
+  const dateInput = document.getElementById('attendance-date');
+  if (dateInput && dateInput._flatpickr) {
+    dateInput._flatpickr.setDate(dateStr);
+  }
+
+  // 2. ดึงช่วงเวลาปัจจุบัน (เช้า/เที่ยง)
+  const period = $("#period-buttons .period-btn.active").data("period") || 'morning';
+
+  // 3. เปิดหน้าต่างเช็คชื่อของห้องนั้นและวันที่เลือกทันที
+  openAttendanceModal(dateStr, period, classroomId, classroomName);
+}
+// ฟังก์ชันเปิดหน้าต่างเช็คเข้าเรียน (Modal) — ใช้ iframe + doGet route
+function openSubjectAttendanceModal() {
+  // สร้าง modal ครั้งแรกเท่านั้น
+  if ($('#subject-attendance-modal').length === 0) {
+    $('body').append(`
+      <div id="subject-attendance-modal"
+           class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+           style="display:none;">
+        <div class="app-card w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden bg-white shadow-2xl rounded-3xl">
+          <div class="flex justify-between items-center p-5 bg-gradient-to-r from-orange-500 to-amber-600 text-white">
+            <h2 class="text-lg font-bold">📚 เช็คชื่อเข้าเรียนรายวิชา</h2>
+            <button type="button"
+                    class="text-white hover:text-gray-200 text-2xl font-bold leading-none"
+                    onclick="$('#subject-attendance-modal').hide()">×</button>
+          </div>
+          <div class="relative flex-grow w-full" style="height: 80vh;">
+            <iframe id="subject-attendance-frame" class="w-full h-full border-none"></iframe>
+          </div>
+        </div>
+      </div>
+    `);
+  }
+
+  $.LoadingOverlay("show", { text: "กำลังโหลดระบบเช็คชื่อรายวิชา..." });
+
+  google.script.run
+    .withSuccessHandler(function (url) {
+      const iframe = document.getElementById('subject-attendance-frame');
+      // ใส่ cache-buster เพื่อบังคับ reload ทุกครั้งที่เปิด
+      iframe.src = url + '?page=subject_attendance&t=' + Date.now();
+
+      iframe.onload = function () {
+        $.LoadingOverlay("hide");
+        $('#subject-attendance-modal').css('display', 'flex');
+      };
+    })
+    .withFailureHandler(function (err) {
+      $.LoadingOverlay("hide");
+      Swal.fire('Error', 'ไม่สามารถโหลดหน้าต่างเช็คชื่อรายวิชาได้: ' + err.message, 'error');
+    })
+    .getScriptUrl(); // ฟังก์ชันนี้มีอยู่แล้วใน Code.gs
+}
+// โหลดรายวิชาสำหรับหน้า "สรุปรายวิชา" เมื่อคลิกแท็บ
+$('.nav-tab[data-tab="subject-summary"]').click(function() {
+  const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
+  const teacherIdentifier = teacher.username || teacher.name || teacher.email || "";
+  if (!teacherIdentifier) return;
+
+  $('#summary-subject-select').html('<option value="">-- กำลังโหลดรายวิชา... --</option>');
+
+  google.script.run.withSuccessHandler(function(res) {
+    const select = $('#summary-subject-select');
+    select.empty();
+    if (res.status === 'success' && res.data.length > 0) {
+      select.append('<option value="">-- เลือกรายวิชาที่ต้องการดูสถิติ --</option>');
+      res.data.forEach(subj => {
+        // ✅ ใช้ displayName ที่ server เตรียมไว้แล้ว (ปลอดภัยกว่า)
+        select.append(`<option value="${subj.key}">${subj.displayName}</option>`);
+      });
+    } else {
+      select.append('<option value="">ไม่พบรายวิชาที่คุณสอนในระบบ</option>');
+    }
+  }).getTeacherSubjectsList(teacherIdentifier);
+});
+
+  // เมื่อเลือกวิชา ให้ดึงข้อมูลสถิติรายบุคคลมาแสดง
+  $('#summary-subject-select').change(function() {
+    const subjectCode = $(this).val();
+    if (!subjectCode) {
+      $('#subject-summary-container').addClass('hidden');
+      return;
+    }
+
+    const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
+    const teacherIdentifier = teacher.username || teacher.name || teacher.email || "";
+
+    Swal.fire({ title: 'กำลังคำนวณสถิติ...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+
+    google.script.run.withSuccessHandler(function(res) {
+      Swal.close();
+      const tbody = $('#subject-summary-tbody');
+      tbody.empty();
+
+      if (res.status === 'success' && res.data.length > 0) {
+        $('#summary-subject-title').text(`📊 สถิติการเข้าเรียนวิชา ${subjectCode}`);
+        
+        res.data.forEach(stu => {
+          tbody.append(`
+            <tr class="border-b border-gray-100 hover:bg-gray-50 transition">
+              <td class="p-3 text-center text-gray-600 font-medium">${stu.id}</td>
+              <td class="p-3 text-gray-800 font-medium">${stu.name}</td>
+              <td class="p-3 text-center font-bold text-emerald-600">${stu.present}</td>
+              <td class="p-3 text-center font-bold text-rose-600">${stu.absent}</td>
+              <td class="p-3 text-center font-bold text-amber-600">${stu.leave}</td>
+              <td class="p-3 text-center font-bold text-blue-600">${stu.late}</td>
+              <td class="p-3 text-center font-bold text-gray-800 bg-gray-100 rounded-r-lg">${stu.total}</td>
+            </tr>
+          `);
+        });
+        $('#subject-summary-container').removeClass('hidden');
+      } else {
+        Swal.fire('ไม่พบข้อมูล', 'ยังไม่มีการบันทึกผลการเข้าเรียนในวิชานี้', 'info');
+        $('#subject-summary-container').addClass('hidden');
+      }
+    }).getSubjectAttendanceSummary(teacherIdentifier, subjectCode);
+  });
 </script>

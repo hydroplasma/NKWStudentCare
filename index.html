@@ -1,8 +1,10 @@
 <!DOCTYPE html>
 <html lang="th">
+
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes, viewport-fit=cover">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes, viewport-fit=cover">
   <title>ระบบเช็คชื่อนักเรียนเข้าร่วมกิจกรรม</title>
   <?!= include('lib') ?>
   <style>
@@ -10,6 +12,7 @@
     body {
       background-color: #f5f5f5;
     }
+
     .nav-tabs-container {
       background-color: rgba(255, 255, 255, 0.9);
       backdrop-filter: blur(12px);
@@ -20,6 +23,7 @@
       box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
       border: 1px solid rgba(255, 255, 255, 0.5);
     }
+
     .nav-tab {
       flex: 1;
       text-align: center;
@@ -32,29 +36,36 @@
       white-space: nowrap;
       background: transparent;
     }
+
     .nav-tab.active {
       background-color: #f97316;
       color: white;
       box-shadow: 0 6px 12px rgba(249, 115, 22, 0.25);
     }
+
     .app-card {
       background-color: #ffffff;
       border-radius: 28px;
       box-shadow: 0 8px 24px rgba(0, 0, 0, 0.04);
       border: 1px solid rgba(0, 0, 0, 0.02);
     }
-    input, select {
+
+    input,
+    select {
       border-radius: 20px !important;
       background-color: #f9fafb !important;
       border: 1px solid #e5e7eb !important;
       padding: 12px 18px !important;
       font-size: 16px !important;
     }
-    input:focus, select:focus {
+
+    input:focus,
+    select:focus {
       background-color: #ffffff !important;
       border-color: #f97316 !important;
       box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.2) !important;
     }
+
     .period-btn {
       border-radius: 40px !important;
       padding: 8px 20px !important;
@@ -64,23 +75,35 @@
       border: 1px solid #e2e8f0;
       transition: all 0.2s;
     }
+
     .period-btn.active {
       background: linear-gradient(135deg, #f97316 0%, #ea580c 100%) !important;
       color: white !important;
       box-shadow: 0 4px 12px rgba(249, 115, 22, 0.4);
       border: none;
     }
+
     .tab-content {
       display: none;
       animation: fadeSlide 0.3s ease-out;
     }
+
     .tab-content.active {
       display: block;
     }
+
     @keyframes fadeSlide {
-      from { opacity: 0; transform: translateY(8px); }
-      to { opacity: 1; transform: translateY(0); }
+      from {
+        opacity: 0;
+        transform: translateY(8px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
     }
+
     .modal {
       display: none;
       position: fixed;
@@ -95,6 +118,7 @@
       justify-content: center;
       padding: 16px;
     }
+
     .modal-content {
       background: #ffffff;
       border-radius: 32px;
@@ -107,25 +131,39 @@
       box-shadow: 0 25px 40px rgba(0, 0, 0, 0.2);
       animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     }
+
     @keyframes slideUp {
-      from { transform: translateY(30px); opacity: 0; }
-      to { transform: translateY(0); opacity: 1; }
+      from {
+        transform: translateY(30px);
+        opacity: 0;
+      }
+
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
     }
+
     .table-responsive {
       overflow-x: auto;
       -webkit-overflow-scrolling: touch;
     }
-    th, td {
+
+    th,
+    td {
       padding: 14px 12px;
     }
+
     thead th {
       background-color: #f97316;
       color: white;
       font-weight: 600;
     }
+
     tbody tr:hover {
       background-color: #fff7ed;
     }
+
     .btn-save {
       background: linear-gradient(135deg, #f97316, #ea580c);
       color: white;
@@ -135,136 +173,196 @@
       box-shadow: 0 4px 12px rgba(249, 115, 22, 0.3);
       transition: all 0.2s;
     }
+
     .btn-save:active {
       transform: scale(0.96);
     }
+
     footer a {
       color: #f97316;
       text-decoration: none;
     }
+
     /* ปุ่มสถานะแนวนอน */
-.status-buttons {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    justify-content: flex-start;
-}
-.status-btn {
-    padding: 8px 16px;
-    border-radius: 40px;
-    font-size: 14px;
-    font-weight: 600;
-    border: 1px solid #e2e8f0;
-    background-color: white;
-    color: #1e293b;
-    transition: all 0.2s ease;
-    cursor: pointer;
-    min-width: 64px;
-    text-align: center;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.02);
-}
-.status-btn.active {
-    border: none;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-}
-.status-btn[data-status="มา"].active { background: #22c55e; color: white; }
-.status-btn[data-status="ขาด"].active { background: #ef4444; color: white; }
-.status-btn[data-status="สาย"].active { background: #eab308; color: white; }
-.status-btn[data-status="ลา"].active { background: #3b82f6; color: white; }
-.status-btn[data-status="ป่วย"].active { background: #a855f7; color: white; }
+    .status-buttons {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-start;
+    }
 
-/* สีพื้นหลังแถวตามสถานะ */
-.bg-present { background-color: #f0fdf4; }   /* มา */
-.bg-absent { background-color: #fef2f2; }   /* ขาด */
-.bg-late { background-color: #fefce8; }     /* สาย */
-.bg-leave { background-color: #eff6ff; }    /* ลา */
-.bg-sick { background-color: #faf5ff; }     /* ป่วย */
+    .status-btn {
+      padding: 8px 16px;
+      border-radius: 40px;
+      font-size: 14px;
+      font-weight: 600;
+      border: 1px solid #e2e8f0;
+      background-color: white;
+      color: #1e293b;
+      transition: all 0.2s ease;
+      cursor: pointer;
+      min-width: 64px;
+      text-align: center;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+    }
 
-/* ปรับแต่ง Modal สำหรับมือถือ */
-@media (max-width: 640px) {
-    .modal-content {
+    .status-btn.active {
+      border: none;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .status-btn[data-status="มา"].active {
+      background: #22c55e;
+      color: white;
+    }
+
+    .status-btn[data-status="ขาด"].active {
+      background: #ef4444;
+      color: white;
+    }
+
+    .status-btn[data-status="สาย"].active {
+      background: #eab308;
+      color: white;
+    }
+
+    .status-btn[data-status="ลา"].active {
+      background: #3b82f6;
+      color: white;
+    }
+
+    .status-btn[data-status="ป่วย"].active {
+      background: #a855f7;
+      color: white;
+    }
+
+    /* สีพื้นหลังแถวตามสถานะ */
+    .bg-present {
+      background-color: #f0fdf4;
+    }
+
+    /* มา */
+    .bg-absent {
+      background-color: #fef2f2;
+    }
+
+    /* ขาด */
+    .bg-late {
+      background-color: #fefce8;
+    }
+
+    /* สาย */
+    .bg-leave {
+      background-color: #eff6ff;
+    }
+
+    /* ลา */
+    .bg-sick {
+      background-color: #faf5ff;
+    }
+
+    /* ป่วย */
+
+    /* ปรับแต่ง Modal สำหรับมือถือ */
+    @media (max-width: 640px) {
+      .modal-content {
         padding: 16px 12px;
         max-height: 95vh;
-    }
-    .status-btn {
+      }
+
+      .status-btn {
         padding: 6px 12px;
         font-size: 12px;
         min-width: 52px;
-    }
-    .status-buttons {
+      }
+
+      .status-buttons {
         gap: 6px;
-    }
-    /* ทำให้ตารางเลื่อนแนวนอนได้ */
-    .table-responsive {
+      }
+
+      /* ทำให้ตารางเลื่อนแนวนอนได้ */
+      .table-responsive {
         margin: 0 -12px;
         padding: 0 12px;
-    }
-    th, td {
+      }
+
+      th,
+      td {
         padding: 10px 8px !important;
+      }
     }
-}
   </style>
 </head>
+
 <body class="text-gray-800">
 
-<div id="login-page" class="min-h-screen flex items-center justify-center p-4" style="background: linear-gradient(145deg, #2d1a0e 0%, #1f1a17 100%);">
-  <div class="bg-white/95 backdrop-blur-xl p-6 sm:p-8 rounded-[2rem] shadow-2xl w-full max-w-md relative overflow-hidden">
-    <div class="absolute -top-20 -right-20 w-40 h-40 bg-orange-400 rounded-full blur-3xl opacity-20"></div>
-    <div class="absolute -bottom-20 -left-20 w-40 h-40 bg-amber-500 rounded-full blur-3xl opacity-20"></div>
-    <div class="flex justify-center mb-4">
-      <img id="login-logo" src="" alt="Logo" class="h-24 w-auto object-contain" onerror="this.src='https://i.postimg.cc/RZ0PCqVy/NKW-LOGO.png'">
-    </div>
-    <h1 id="login-system-name" class="text-2xl font-extrabold text-center text-gray-900 mb-1"></h1>
-    <h2 id="login-school-name" class="text-sm text-center text-gray-500 mb-4"></h2>
-    <div class="bg-orange-50 border border-orange-200 rounded-2xl p-3 mb-6">
-      <h2 class="text-xs text-center text-orange-700 font-medium">ครูที่ปรึกษาเช็คกิจกรรมหน้าเสาธง<br>หัวหน้าห้อง/ตัวแทนเช็คเข้าแถวตอนเที่ยง</h2>
-    </div>
-    <form id="login-form" class="space-y-5">
-      <div>
-        <label class="block text-gray-600 text-sm font-bold mb-1 ml-1">👤 ชื่อผู้ใช้</label>
-        <input type="text" id="username" class="w-full" placeholder="ระบุชื่อผู้ใช้งาน">
+  <div id="login-page" class="min-h-screen flex items-center justify-center p-4"
+    style="background: linear-gradient(145deg, #2d1a0e 0%, #1f1a17 100%);">
+    <div
+      class="bg-white/95 backdrop-blur-xl p-6 sm:p-8 rounded-[2rem] shadow-2xl w-full max-w-md relative overflow-hidden">
+      <div class="absolute -top-20 -right-20 w-40 h-40 bg-orange-400 rounded-full blur-3xl opacity-20"></div>
+      <div class="absolute -bottom-20 -left-20 w-40 h-40 bg-amber-500 rounded-full blur-3xl opacity-20"></div>
+      <div class="flex justify-center mb-4">
+        <img id="login-logo" src="" alt="Logo" class="h-24 w-auto object-contain" onerror="this.src='https://i.postimg.cc/RZ0PCqVy/NKW-LOGO.png'">
       </div>
-      <div>
-        <label class="block text-gray-600 text-sm font-bold mb-1 ml-1">🔑 รหัสผ่าน</label>
-        <input type="password" id="password" class="w-full" placeholder="ระบุรหัสผ่าน">
+      <h1 id="login-system-name" class="text-2xl font-extrabold text-center text-gray-900 mb-1"></h1>
+      <h2 id="login-school-name" class="text-sm text-center text-gray-500 mb-4"></h2>
+      <div class="bg-orange-50 border border-orange-200 rounded-2xl p-3 mb-6">
+        <h2 class="text-xs text-center text-orange-700 font-medium">ครูที่ปรึกษาเช็คกิจกรรมหน้าเสาธง<br>หัวหน้าห้อง/ตัวแทนเช็คเข้าแถวตอนเที่ยง
+        </h2>
       </div>
-      <button type="submit" class="w-full bg-gradient-to-r from-orange-500 to-amber-600 text-white py-4 rounded-2xl font-bold text-lg shadow-lg transition active:scale-95">เข้าสู่ระบบ</button>
-    </form>
-    <p id="login-copyright" class="text-center text-gray-400 text-xs mt-6"></p>
-  </div>
-</div>
-
-<div id="main-page" class="hidden min-h-screen pb-10">
-  <header class="bg-gradient-to-b from-orange-800 to-amber-700 text-white pb-16 pt-6 px-4 rounded-b-[2rem] shadow-lg">
-    <div class="max-w-7xl mx-auto">
-      <div class="flex justify-between items-center mb-4">
-        <div class="flex items-center gap-3">
-          <div class="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center border border-white/30">
-            <span class="text-xl">👨‍🏫</span>
-          </div>
-          <div>
-            <p class="text-orange-200 text-xs">ยินดีต้อนรับ</p>
-            <h1 id="teacher-name" class="text-lg font-bold"></h1>
-          </div>
-        </div>
-        <button id="logout-btn" class="p-2 bg-white/10 rounded-full active:scale-90"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg></button>
-      </div>
-      <div class="flex items-center gap-2">
-        <img id="header-logo" src="" class="h-10 bg-white p-1 rounded-xl hidden sm:block" onerror="this.src='https://i.postimg.cc/RZ0PCqVy/NKW-LOGO.png'">
+      <form id="login-form" class="space-y-5">
         <div>
-          <h2 id="header-system-name" class="text-xl font-extrabold"></h2>
-          <p id="header-school-name" class="text-orange-200 text-xs"></p>
+          <label class="block text-gray-600 text-sm font-bold mb-1 ml-1">👤 ชื่อผู้ใช้</label>
+          <input type="text" id="username" class="w-full" placeholder="ระบุชื่อผู้ใช้งาน">
+        </div>
+        <div>
+          <label class="block text-gray-600 text-sm font-bold mb-1 ml-1">🔑 รหัสผ่าน</label>
+          <input type="password" id="password" class="w-full" placeholder="ระบุรหัสผ่าน">
+        </div>
+        <button type="submit" class="w-full bg-gradient-to-r from-orange-500 to-amber-600 text-white py-4 rounded-2xl font-bold text-lg shadow-lg transition active:scale-95">เข้าสู่ระบบ</button>
+      </form>
+      <p id="login-copyright" class="text-center text-gray-400 text-xs mt-6"></p>
+    </div>
+  </div>
+
+  <div id="main-page" class="hidden min-h-screen pb-10">
+    <header class="bg-gradient-to-b from-orange-800 to-amber-700 text-white pb-16 pt-6 px-4 rounded-b-[2rem] shadow-lg">
+      <div class="max-w-7xl mx-auto">
+        <div class="flex justify-between items-center mb-4">
+          <div class="flex items-center gap-3">
+            <div class="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center border border-white/30">
+              <span class="text-xl">👨‍🏫</span>
+            </div>
+            <div>
+              <p class="text-orange-200 text-xs">ยินดีต้อนรับ</p>
+              <h1 id="teacher-name" class="text-lg font-bold"></h1>
+            </div>
+          </div>
+          <button id="logout-btn" class="p-2 bg-white/10 rounded-full active:scale-90"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg></button>
+        </div>
+        <div class="flex items-center gap-2">
+          <img id="header-logo" src="" class="h-10 bg-white p-1 rounded-xl hidden sm:block" onerror="this.src='https://i.postimg.cc/RZ0PCqVy/NKW-LOGO.png'">
+          <div>
+            <h2 id="header-system-name" class="text-xl font-extrabold"></h2>
+            <p id="header-school-name" class="text-orange-200 text-xs"></p>
+          </div>
         </div>
       </div>
-    </div>
-  </header>
+    </header>
+    <!-- Navigation Tabs (แถบเมนูด้านบน) -->
+    <div class="app-card p-3">
+      <div class="nav-tabs-container">
+  <button class="nav-tab active" data-tab="attendance">📝 เช็คชื่อ</button>
+  <button class="nav-tab" onclick="openCleaningModal()">🧹 เช็คเขตพื้นที่</button>
+  <!-- ค้นหาปุ่มเดิม และเปลี่ยนเป็นแบบนี้ เพื่อให้เรียกฟังก์ชันเปิด Modal -->
+<button class="nav-tab" onclick="openSubjectAttendanceModal()">📚 เช็คเข้าเรียน</button>
+    <!-- ✨ เพิ่มปุ่มสรุปรายวิชาตรงนี้ -->
+  <button class="nav-tab" data-tab="subject-summary">📈 สรุปรายวิชา</button>
 
-  <div class="max-w-7xl mx-auto px-4 -mt-8 relative z-10">
-    <div class="nav-tabs-container mb-5">
-      <button class="nav-tab active" data-tab="attendance">📝 เช็คชื่อ</button>
-      <button class="nav-tab" data-tab="classroom-summary">📊 รายห้อง</button>
-      <button class="nav-tab" data-tab="overall-summary">🏫 ภาพรวม</button>
-      <a id="student-analysis-link" class="nav-tab" target="_blank" style="text-decoration: none;">🔍 วิเคราะห์</a>
+  <button class="nav-tab" data-tab="classroom-summary">📊 รายห้อง</button>
+  <button class="nav-tab" data-tab="overall-summary">🏫 ภาพรวม</button>
+</div>
     </div>
 
     <div id="attendance" class="tab-content active">
@@ -292,43 +390,115 @@
         </div>
       </div>
     </div>
+    <!-- 📈 Tab เนื้อหา: สรุปการเข้าเรียนรายวิชา -->
+    <div id="subject-summary" class="tab-content hidden">
+      <div class="app-card p-5 mb-5">
+        <div class="grid grid-cols-1 gap-4 items-end">
+          <div>
+            <label class="block text-gray-500 text-sm font-bold mb-1 ml-1">📚 เลือกรายวิชาเพื่อดูสถิติ</label>
+            <select id="summary-subject-select" class="w-full">
+              <option value="">-- กำลังโหลดรายวิชา... --</option>
+            </select>
+          </div>
+        </div>
+      </div>
 
+      <!-- ตารางสรุปสถิติ -->
+      <div id="subject-summary-container" class="app-card p-5 hidden">
+        <h3 id="summary-subject-title" class="text-xl font-bold text-gray-800 mb-4 text-center">สถิติการเข้าเรียน</h3>
+        <div class="table-responsive shadow-sm mb-6">
+          <table class="min-w-full bg-white border border-gray-100 rounded-2xl overflow-hidden text-sm">
+            <thead>
+              <tr class="bg-gray-800 text-white">
+                <th class="p-3 text-center">รหัส/เลขที่</th>
+                <th class="p-3 text-left">ชื่อ-สกุล</th>
+                <th class="p-3 text-center text-emerald-400">มา</th>
+                <th class="p-3 text-center text-rose-400">ขาด</th>
+                <th class="p-3 text-center text-amber-400">ลา</th>
+                <th class="p-3 text-center text-blue-400">สาย</th>
+                <th class="p-3 text-center">รวม (ครั้ง)</th>
+              </tr>
+            </thead>
+            <tbody id="subject-summary-tbody">
+              <!-- ข้อมูลสถิติจะถูกเพิ่มที่นี่ -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
     <div id="classroom-summary" class="tab-content hidden">
       <div class="app-card p-5 mb-5">
         <div class="flex flex-col md:flex-row gap-4">
-          <div class="w-full md:w-1/3"><label class="block text-gray-500 text-sm font-bold mb-1">🏫 เลือกห้องเรียน</label><select id="summary-classroom" class="w-full"></select></div>
-          <div class="w-full md:w-1/3"><label class="block text-gray-500 text-sm font-bold mb-1">📅 เลือกวันที่</label><input type="text" id="summary-date" class="w-full"></div>
-          <div class="w-full md:w-1/3"><label class="block text-gray-500 text-sm font-bold mb-1">⏰ เลือกช่วงเวลา</label><div id="summary-period-buttons" class="flex gap-2 overflow-x-auto"></div></div>
+          <div class="w-full md:w-1/3">
+            <label class="block text-gray-500 text-sm font-bold mb-1">🏫 เลือกห้องเรียน</label><select id="summary-classroom" class="w-full"></select>
+          </div>
+          <div class="w-full md:w-1/3">
+            <label class="block text-gray-500 text-sm font-bold mb-1">📅 เลือกวันที่</label><input type="text" id="summary-date" class="w-full">
+          </div>
+          <div class="w-full md:w-1/3"><label class="block text-gray-500 text-sm font-bold mb-1">⏰ เลือกช่วงเวลา</label>
+            <div id="summary-period-buttons" class="flex gap-2 overflow-x-auto"></div>
+          </div>
         </div>
       </div>
       <div class="app-card p-5">
         <div id="empty-dashboard" class="text-center py-12 text-gray-400">กรุณาเลือกข้อมูล</div>
         <h2 id="classroom-summary-title" class="text-xl font-bold text-center mb-5"></h2>
-        <div id="classroom-table-container" class="hidden mb-6"><div id="classroom-summary-list"></div></div>
+        <div id="classroom-table-container" class="hidden mb-6">
+          <div id="classroom-summary-list"></div>
+        </div>
         <div id="classroom-chart-container" class="hidden flex flex-col md:flex-row gap-5 mb-6">
           <div class="w-full md:w-1/2 bg-gray-50 p-4 rounded-2xl h-72"><canvas id="classroom-pie-chart"></canvas></div>
           <div class="w-full md:w-1/2 bg-gray-50 p-4 rounded-2xl h-72"><canvas id="classroom-bar-chart"></canvas></div>
         </div>
-        <div id="classroom-students-list-container" class="hidden"><h3 class="text-lg font-bold mb-3">รายชื่อนักเรียน</h3><div class="table-responsive"><table class="min-w-full"><thead><tr class="bg-orange-500 text-white"><th>รหัส</th><th>เลขที่</th><th>ชื่อ</th><th>สถานะ</th></tr></thead><tbody id="classroom-students-list"></tbody></table></div></div>
+        <div id="classroom-students-list-container" class="hidden">
+          <h3 class="text-lg font-bold mb-3">รายชื่อนักเรียน</h3>
+          <div class="table-responsive">
+            <table class="min-w-full">
+              <thead>
+                <tr class="bg-orange-500 text-white">
+                  <th>รหัส</th>
+                  <th>เลขที่</th>
+                  <th>ชื่อ</th>
+                  <th>สถานะ</th>
+                </tr>
+              </thead>
+              <tbody id="classroom-students-list"></tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </div>
 
     <div id="overall-summary" class="tab-content hidden">
       <div class="app-card p-5 mb-5">
         <div class="flex flex-col md:flex-row gap-4">
-          <div class="w-full md:w-1/2"><label class="block text-gray-500 text-sm font-bold mb-1">📅 เลือกวันที่</label><input type="text" id="overall-date" class="w-full"></div>
-          <div class="w-full md:w-1/2"><label class="block text-gray-500 text-sm font-bold mb-1">⏰ เลือกช่วงเวลา</label><div id="overall-period-buttons" class="flex gap-2 overflow-x-auto"></div></div>
+          <div class="w-full md:w-1/2">
+            <label class="block text-gray-500 text-sm font-bold mb-1">📅 เลือกวันที่</label><input type="text" id="overall-date" class="w-full">
+          </div>
+          <div class="w-full md:w-1/2"><label class="block text-gray-500 text-sm font-bold mb-1">⏰ เลือกช่วงเวลา</label>
+            <div id="overall-period-buttons" class="flex gap-2 overflow-x-auto"></div>
+          </div>
         </div>
       </div>
       <div class="app-card p-5">
         <div id="overall-empty-dashboard" class="text-center py-12 text-gray-400">กรุณาเลือกข้อมูล</div>
         <h2 id="overall-summary-title" class="text-xl font-bold text-center mb-5"></h2>
-        <div id="overall-table-container" class="hidden mb-6"><div class="table-responsive"><table class="min-w-full"><thead id="overall-summary-thead"></thead><tbody id="overall-summary-list"></tbody></table></div></div>
+        <div id="overall-table-container" class="hidden mb-6">
+          <div class="table-responsive">
+            <table class="min-w-full">
+              <thead id="overall-summary-thead"></thead>
+              <tbody id="overall-summary-list"></tbody>
+            </table>
+          </div>
+        </div>
         <div id="overall-chart-container" class="hidden flex flex-col md:flex-row gap-5 mb-6">
           <div class="w-full md:w-1/2 bg-gray-50 p-4 rounded-2xl h-72"><canvas id="overall-pie-chart"></canvas></div>
           <div class="w-full md:w-1/2 bg-gray-50 p-4 rounded-2xl h-72"><canvas id="overall-bar-chart"></canvas></div>
         </div>
-        <div id="overall-status-summary" class="hidden"><h3 class="text-lg font-bold mb-3">สรุปนักเรียนที่ไม่มา</h3><div id="status-cards"></div></div>
+        <div id="overall-status-summary" class="hidden">
+          <h3 class="text-lg font-bold mb-3">สรุปนักเรียนที่ไม่มา</h3>
+          <div id="status-cards"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -336,22 +506,34 @@
     <p id="footer-system-admin"></p>
     <p id="footer-copyright"></p>
   </footer>
-</div>
-
-<div id="attendance-modal" class="modal">
-  <div class="modal-content">
-    <div class="flex justify-between items-center p-4 border-b">
-      <h2 id="modal-title" class="text-xl font-bold text-gray-800"></h2>
-      <button class="close text-3xl text-gray-400 hover:text-orange-500" onclick="document.getElementById('attendance-modal').style.display='none';">&times;</button>
-    </div>
-    <div class="table-responsive p-4 flex-grow">
-      <table class="min-w-full"><thead><tr class="bg-orange-500 text-white"><th>รหัส</th><th>เลขที่</th><th>ชื่อ</th><th>สถานะ</th><th>สาเหตุ</th></tr></thead><tbody id="modal-students-list"></tbody></table>
-    </div>
-    <div class="p-4 flex justify-end"><button id="save-modal-attendance" class="btn-save">💾 บันทึก</button></div>
   </div>
-</div>
 
-<?!= include('script_main') ?>
-<?!= include('script_summary') ?>
+  <div id="attendance-modal" class="modal">
+    <div class="modal-content">
+      <div class="flex justify-between items-center p-4 border-b">
+        <h2 id="modal-title" class="text-xl font-bold text-gray-800"></h2>
+        <button class="close text-3xl text-gray-400 hover:text-orange-500" onclick="document.getElementById('attendance-modal').style.display='none';">&times;</button>
+      </div>
+      <div class="table-responsive p-4 flex-grow">
+        <table class="min-w-full">
+          <thead>
+            <tr class="bg-orange-500 text-white">
+              <th>รหัส</th>
+              <th>เลขที่</th>
+              <th>ชื่อ</th>
+              <th>สถานะ</th>
+              <th>สาเหตุ</th>
+            </tr>
+          </thead>
+          <tbody id="modal-students-list"></tbody>
+        </table>
+      </div>
+      <div class="p-4 flex justify-end"><button id="save-modal-attendance" class="btn-save">💾 บันทึก</button></div>
+    </div>
+  </div>
+
+  <?!= include('script_main') ?>
+  <?!= include('script_summary') ?>
 </body>
+
 </html>

@@ -5,23 +5,29 @@ function doGet(e) {
     const site_config = configRes.data ? configRes.data.site_config : {};
     const systemName = site_config['systemName'] || 'Student Attendance System';
 
-    // หน้า stats เดิม
-    if (e.parameter.page == 'stats') {
-      return HtmlService.createTemplateFromFile('stats').evaluate()
-        .setTitle(systemName + " - สถิติ")
-        .addMetaTag('viewport', 'width=device-width, initial-scale=1.0');
-    }
-
-    // หน้า stats2 ใหม่ (ที่คุณต้องการเพิ่ม)
-    if (e.parameter.page == 'stats2') {
-      return HtmlService.createTemplateFromFile('stats2').evaluate()
-        .setTitle(systemName + " - วิเคราะห์รายชั้น")
-        .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
-        .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-    }
-
-// หน้าหลัก (แก้ให้โหลด stats2 เป็นหน้าแรก)
-    return HtmlService.createTemplateFromFile('stats2').evaluate()
+// หน้า stats
+if (e.parameter.page === 'stats') {
+  return HtmlService.createTemplateFromFile('stats').evaluate()
+    .setTitle(systemName + " - วิเคราะห์รายชั้น")
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+} 
+// หน้า cleaning (ตัวอย่างการเพิ่มหน้าใหม่)
+else if (e.parameter.page === 'cleaning') {
+  return HtmlService.createTemplateFromFile('cleaning').evaluate()
+    .setTitle(systemName + " - เขตพื้นที่")
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+// หน้า subject_attendance (สำหรับเปิดใน iframe modal)
+else if (e.parameter.page === 'subject_attendance') {
+  return HtmlService.createTemplateFromFile('subject_attendance').evaluate()
+    .setTitle(systemName + " - เช็คชื่อรายวิชา")
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+// หน้าหลัก (โหลด index เป็นหน้าแรก)
+    return HtmlService.createTemplateFromFile('index').evaluate()
       .setTitle(systemName) // หรือเปลี่ยนเป็น systemName + " - วิเคราะห์รายชั้น" ตามที่ต้องการ
       .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
@@ -55,6 +61,13 @@ const SHEET_NAMES = {
   ATTENDANCE: 'Attendance'
 };
 
+// 1. เพิ่มตัวแปรชื่อชีตสำหรับระบบเขตพื้นที่
+const CLEANING_SHEET_NAMES = {
+  ATTENDANCE: 'Cleaning_Attendance',
+  SCORES: 'Cleaning_Scores',
+  CRITERIA: 'Cleaning_Criteria'
+};
+
 // Headers for each sheet
 const HEADERS = {
   [SHEET_NAMES.CONFIG]: ['key', 'value'],
@@ -63,7 +76,12 @@ const HEADERS = {
   [SHEET_NAMES.PERIODS]: ['id', 'name', 'status'],
   [SHEET_NAMES.CLASSROOMS]: ['id', 'name', 'status'],
   [SHEET_NAMES.STUDENTS]: ['classroom_id', 'student_id', 'no', 'name', 'status'],
-  [SHEET_NAMES.ATTENDANCE]: ['date', 'period', 'room_id', 'teacher', 'students', 'updated_at']
+  [SHEET_NAMES.ATTENDANCE]: ['date', 'period', 'room_id', 'teacher', 'students', 'updated_at'],
+  
+  // 2. เพิ่มหัวตารางสำหรับระบบเขตพื้นที่ (ป้องกัน Error จำนวนคอลัมน์เป็น 0)
+  [CLEANING_SHEET_NAMES.ATTENDANCE]: ['Date', 'Classroom ID', 'Checker ID', 'Student Data', 'Updated At'],
+  [CLEANING_SHEET_NAMES.SCORES]: ['Date', 'Classroom ID', 'Checker ID', 'Scores', 'Total Score', 'Updated At'],
+  [CLEANING_SHEET_NAMES.CRITERIA]: ['ID', 'Name', 'Max Score']
 };
 
 // API Version
@@ -617,13 +635,10 @@ function createSampleData(spreadsheetMode = DEFAULT_SPREADSHEET_MODE) {
       statusSheet.getRange(2, 1, statusData.length, statusData[0].length).setValues(statusData);
 
       // Teachers
-      const teachersSheet = getOrCreateSheet(SHEET_NAMES.TEACHERS, spreadsheetMode);
-      teachersSheet.getDataRange().clearContent();
-      teachersSheet.getRange(1, 1, 1, HEADERS[SHEET_NAMES.TEACHERS].length).setValues([HEADERS[SHEET_NAMES.TEACHERS]]);
-      const teachersData = [
-        [1, 'ครูสมชาย ใจดี', 'somchai', '1234', 1, 'm1-1,m2-1']
-      ];
-      teachersSheet.getRange(2, 1, teachersData.length, teachersData[0].length).setValues(teachersData);
+const teachersSheet = getOrCreateSheet(SHEET_NAMES.TEACHERS, spreadsheetMode);
+teachersSheet.getDataRange().clearContent();
+teachersSheet.getRange(1, 1, 1, HEADERS[SHEET_NAMES.TEACHERS].length).setValues([HEADERS[SHEET_NAMES.TEACHERS]]);
+// ✅ ไม่สร้างครูตัวอย่าง — ให้แอดมินเพิ่มครูจริงในชีตเอง
 
       // Periods
       const periodsSheet = getOrCreateSheet(SHEET_NAMES.PERIODS, spreadsheetMode);
@@ -931,11 +946,6 @@ function getTopAbsentStudents(startDate, endDate, period, limit, spreadsheetMode
 // CLEANING SYSTEM - SERVER SIDE CODE
 // ========================================
 
-const CLEANING_SHEET_NAMES = {
-  CRITERIA: 'CleaningCriteria',
-  ATTENDANCE: 'CleaningAttendance',
-  SCORES: 'CleaningScores'
-};
 
 const CLEANING_HEADERS = {
   [CLEANING_SHEET_NAMES.CRITERIA]: ['id', 'name', 'max_score'],
@@ -943,32 +953,58 @@ const CLEANING_HEADERS = {
   [CLEANING_SHEET_NAMES.SCORES]: ['date', 'classroom_id', 'checker_id', 'score_json', 'total_score', 'updated_at']
 };
 
-function getCleaningConfig(spreadsheetMode = DEFAULT_SPREADSHEET_MODE) {
+function getCleaningConfig() {
   try {
-    const classroomsResponse = getClassrooms([], spreadsheetMode);
-    if (classroomsResponse.status !== 'success') throw new Error('Failed to load classrooms');
-    
-    const studentsResponse = getAllStudents(spreadsheetMode);
-    if (studentsResponse.status !== 'success') throw new Error('Failed to load students');
-    
-    const criteriaSheet = getOrCreateSheet(CLEANING_SHEET_NAMES.CRITERIA, spreadsheetMode);
-    const criteriaData = criteriaSheet.getDataRange().getValues();
-    const criteria = criteriaData.length <= 1 ? [] : criteriaData.slice(1).map(row => ({
-      id: row[0],
-      name: row[1],
-      max_score: row[2]
-    }));
-    
+    const classrooms = getClassroomsList(); // หรือฟังก์ชันดึงรายชื่อห้องของคุณ
+    const students = getAllStudentsGroupedByClassroom(); // ฟังก์ชันดึงรายชื่อนักเรียนจัดกลุ่มตามห้อง
+    const criteria = getCleaningCriteria(); // เกณฑ์การประเมิน
+
     return createResponse('success', 'Config loaded successfully', {
-      classrooms: classroomsResponse.data,
-      students: studentsResponse.data,
+      classrooms: classrooms,
+      students: students,
       criteria: criteria
     });
   } catch (error) {
     return createResponse('error', 'Failed to load config: ' + error.message, null, error);
   }
 }
+function getCleaningConfig() {
+  try {
+    // 1. ดึงข้อมูลห้องเรียนทั้งหมดโดยอาศัยฟังก์ชัน getClassrooms เดิมในระบบ
+    let classrooms = [];
+    try {
+      const crRes = getClassrooms([]); // ส่ง array ว่างเพื่อดึงห้องทั้งหมด
+      classrooms = crRes.data || [];
+    } catch(e) {
+      throw new Error("ไม่สามารถเรียกใช้งานฟังก์ชัน getClassrooms ได้");
+    }
 
+    // 2. ดึงข้อมูลนักเรียนทั้งหมดจัดกลุ่มตามห้องโดยอาศัยฟังก์ชัน getStudents เดิมในระบบ
+    let students = {};
+    try {
+      const roomIds = classrooms.map(c => c.id);
+      const stRes = getStudents(roomIds);
+      students = stRes.data || {};
+    } catch(e) {
+      throw new Error("ไม่สามารถเรียกใช้งานฟังก์ชัน getStudents ได้");
+    }
+
+    // 3. กำหนดหัวข้อเกณฑ์การให้คะแนน (คุณครูสามารถแก้ไขชื่อเกณฑ์หรือคะแนนเต็มได้ที่นี่)
+    const criteria = [
+      { name: "ความสะอาดพื้นและบริเวณโดยรอบ", max_score: 10 },
+      { name: "การจัดการขยะและถังขยะ", max_score: 10 },
+      { name: "ความเรียบร้อยของการจัดเก็บอุปกรณ์", max_score: 10 }
+    ];
+
+    return createResponse('success', 'Config loaded successfully', {
+      classrooms: classrooms,
+      students: students,
+      criteria: criteria
+    });
+  } catch (error) {
+    return createResponse('error', error.message, null, error);
+  }
+}
 function saveCleaningData(jsonData, spreadsheetMode = DEFAULT_SPREADSHEET_MODE) {
   try {
     const lock = LockService.getScriptLock();
@@ -1041,31 +1077,59 @@ function saveCleaningData(jsonData, spreadsheetMode = DEFAULT_SPREADSHEET_MODE) 
 function getCleaningStats(filter, spreadsheetMode = DEFAULT_SPREADSHEET_MODE) {
   try {
     const { startDate, endDate, classroom_id } = filter;
+    
+    // ดึงข้อมูลชีตต่างๆ
     const attendanceSheet = getOrCreateSheet(CLEANING_SHEET_NAMES.ATTENDANCE, spreadsheetMode);
     const attendanceData = attendanceSheet.getDataRange().getValues();
     const scoresSheet = getOrCreateSheet(CLEANING_SHEET_NAMES.SCORES, spreadsheetMode);
     const scoresData = scoresSheet.getDataRange().getValues();
 
+    // 💡 [เพิ่มใหม่] ดึงข้อมูลจากชีต Teachers เพื่อแปลง Username เป็น ชื่อจริง
+    const teachersSheet = getOrCreateSheet(SHEET_NAMES.TEACHERS, spreadsheetMode);
+    const teachersData = teachersSheet.getDataRange().getValues();
+    const teacherMap = {};
+    // โครงสร้างชีต Teachers: ['id', 'name', 'username', ...] -> name = row[1], username = row[2]
+    teachersData.slice(1).forEach(row => {
+      const name = String(row[1]).trim();
+      const username = String(row[2]).trim();
+      if (username) {
+        teacherMap[username] = name;
+      }
+    });
+
     // กรองข้อมูลซ้ำ
     const cleanAttendance = getCleanedCleaningRows(attendanceData);
     const cleanScores = getCleanedCleaningRows(scoresData);
 
+    const getFormattedDate = (dateVal) => {
+      if (!dateVal) return "";
+      if (dateVal instanceof Date) {
+        return Utilities.formatDate(dateVal, Session.getScriptTimeZone(), "yyyy-MM-dd");
+      }
+      return String(dateVal).trim();
+    };
+
+    // กรองข้อมูล Attendance
     const filteredAttendance = cleanAttendance.filter(row => {
-      const rowDate = String(row[0]).trim();
+      if (row[0] === 'Date') return false; 
+      const rowDate = getFormattedDate(row[0]);
       const rowClassroom = String(row[1]).trim();
       const dateMatch = rowDate >= startDate && rowDate <= endDate;
       const classroomMatch = !classroom_id || rowClassroom === classroom_id;
       return dateMatch && classroomMatch;
     });
 
+    // กรองข้อมูล Scores
     const filteredScores = cleanScores.filter(row => {
-      const rowDate = String(row[0]).trim();
+      if (row[0] === 'Date') return false;
+      const rowDate = getFormattedDate(row[0]);
       const rowClassroom = String(row[1]).trim();
       const dateMatch = rowDate >= startDate && rowDate <= endDate;
       const classroomMatch = !classroom_id || rowClassroom === classroom_id;
       return dateMatch && classroomMatch;
     });
 
+    // คำนวณสถิตินักเรียน
     const studentStats = {};
     filteredAttendance.forEach(row => {
       const students = JSON.parse(row[3] || '[]');
@@ -1083,6 +1147,7 @@ function getCleaningStats(filter, spreadsheetMode = DEFAULT_SPREADSHEET_MODE) {
 
     const topStudents = Object.values(studentStats).sort((a, b) => b.done - a.done).slice(0, 5);
 
+    // คำนวณคะแนนเฉลี่ย
     let totalScore = 0;
     let count = 0;
     filteredScores.forEach(row => {
@@ -1097,13 +1162,20 @@ function getCleaningStats(filter, spreadsheetMode = DEFAULT_SPREADSHEET_MODE) {
     });
     const avgScore = count > 0 ? (totalScore / count).toFixed(2) : 0;
 
-    const scoreDetails = filteredScores.map(row => ({
-      date: row[0],
-      classroom_id: row[1],
-      checker: row[2],
-      scores: JSON.parse(row[3] || '{}'),
-      total_score: row[4]
-    }));
+    // จัดเรียงรายละเอียดคะแนนสำหรับตาราง
+    const scoreDetails = filteredScores.map(row => {
+      const checkerUsername = String(row[2]).trim();
+      // 💡 [แก้ไข] นำ username ไปค้นหาชื่อจริงใน teacherMap ถ้าไม่เจอให้แสดง username ไปก่อน
+      const checkerName = teacherMap[checkerUsername] || checkerUsername; 
+
+      return {
+        date: getFormattedDate(row[0]), 
+        classroom_id: row[1],
+        checker: checkerName, 
+        scores: JSON.parse(row[3] || '{}'),
+        total_score: row[4]
+      };
+    });
 
     return createResponse('success', 'Stats retrieved successfully', {
       studentStats: Object.values(studentStats), topStudents, avgScore, scoreDetails
@@ -1265,4 +1337,617 @@ function getStudentReportData(studentId, startDate, endDate, statusFilters, clas
   } catch (e) {
     return { status: 'error', message: e.message };
   }
+}
+function getWeeklyAttendanceByRoom(weekDates, period, spreadsheetMode = DEFAULT_SPREADSHEET_MODE) {
+  try {
+    const sheet = getOrCreateSheet(SHEET_NAMES.ATTENDANCE, spreadsheetMode);
+    const data = sheet.getDataRange().getValues();
+    const statusMap = {};
+
+    // 💡 ฟังก์ชันช่วยแปลงวันที่จาก Google Sheets ให้เป็น YYYY-MM-DD เสมอ
+    const getFormattedDate = (dateVal) => {
+      if (!dateVal) return "";
+      if (dateVal instanceof Date) {
+        return Utilities.formatDate(dateVal, Session.getScriptTimeZone(), "yyyy-MM-dd");
+      }
+      return String(dateVal).trim();
+    };
+
+    for (let i = 1; i < data.length; i++) {
+      const rowDate = getFormattedDate(data[i][0]);
+      const rowPeriod = String(data[i][1]).trim();
+      const rowRoom = String(data[i][2]).trim();
+
+      // ตรวจสอบว่าตรงกับวันที่ในสัปดาห์ และช่วงเวลาที่เลือกหรือไม่
+      if (weekDates.includes(rowDate) && rowPeriod === period) {
+        if (!statusMap[rowRoom]) statusMap[rowRoom] = {};
+        statusMap[rowRoom][rowDate] = true; // บันทึกว่าวันนั้นเช็คแล้วเป็นเครื่องหมายถูก
+      }
+    }
+    
+    return createResponse('success', 'Weekly status retrieved', statusMap);
+  } catch (error) {
+    return createResponse('error', 'Failed to get weekly status: ' + error.message, null, error);
+  }
+}
+function setupCleaningSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  const sheetNames = {
+    ATTENDANCE: 'Cleaning_Attendance', 
+    SCORES: 'Cleaning_Scores',         
+    CRITERIA: 'Cleaning_Criteria'      
+  };
+
+  // 1. จัดการชีต Attendance
+  // ใช้ || (OR) ถ้าหาชีตไม่เจอให้สร้างใหม่ทันที เพื่อเลี่ยงการเขียนทับตัวแปร
+  const sheetAtt = ss.getSheetByName(sheetNames.ATTENDANCE) || ss.insertSheet(sheetNames.ATTENDANCE);
+  const headersAtt = ['Date', 'Classroom ID', 'Checker ID', 'Student Data', 'Updated At'];
+  sheetAtt.getRange(1, 1, 1, headersAtt.length).setValues([headersAtt])
+          .setFontWeight("bold").setBackground("#d9ead3");
+
+  // 2. จัดการชีต Scores
+  const sheetSco = ss.getSheetByName(sheetNames.SCORES) || ss.insertSheet(sheetNames.SCORES);
+  const headersSco = ['Date', 'Classroom ID', 'Checker ID', 'Scores', 'Total Score', 'Updated At'];
+  sheetSco.getRange(1, 1, 1, headersSco.length).setValues([headersSco])
+          .setFontWeight("bold").setBackground("#c9daf8");
+
+  // 3. จัดการชีต Criteria
+  let sheetCri = ss.getSheetByName(sheetNames.CRITERIA);
+  if (!sheetCri) {
+    sheetCri = ss.insertSheet(sheetNames.CRITERIA);
+    // สร้างข้อมูลเกณฑ์ตั้งต้น
+    const criteriaData = [
+      ['ID', 'Name', 'Max Score'],
+      ['C01', 'กวาดพื้น/ถูพื้น', 10],
+      ['C02', 'ทิ้งขยะ', 5],
+      ['C03', 'ความเป็นระเบียบ', 5]
+    ];
+    sheetCri.getRange(1, 1, criteriaData.length, criteriaData[0].length).setValues(criteriaData);
+    sheetCri.getRange(1, 1, 1, criteriaData[0].length).setFontWeight("bold").setBackground("#fff2cc");
+  } else {
+    // ถ้ามีอยู่แล้วแค่เขียนหัวตาราง
+    const headersCri = ['ID', 'Name', 'Max Score'];
+    sheetCri.getRange(1, 1, 1, headersCri.length).setValues([headersCri])
+            .setFontWeight("bold").setBackground("#fff2cc");
+  }
+
+  console.log('✅ สร้างชีตและหัวตารางสำเร็จ!');
+}
+// ฟังก์ชันดึงตารางสอนรายวิชาของครูในวันนี้ หรือตามที่เลือก
+function getTeacherSchedule(teacherEmail, targetDate) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Timetable"); // สมมติว่ามีชีตตารางสอน
+  if (!sheet) return [];
+  
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  var result = [];
+  
+  // แปลงวันเป็นชื่อวัน (เช่น จันทร์, อังคาร)
+  var dateObj = targetDate ? new Date(targetDate) : new Date();
+  var days = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์"];
+  var dayName = days[dateObj.getDay()];
+  
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    // สมมติโครงสร้างคอลัมน์: [TimetableID, DayOfWeek, Period, SubjectCode, SubjectName, TeacherEmail, GradeLevel, Room]
+    var rowDay = row[1];
+    var rowEmail = row[5];
+    
+    if (rowDay === dayName && rowEmail === teacherEmail) {
+      result.push({
+        timetableId: row[0],
+        period: row[2],
+        subjectCode: row[3],
+        subjectName: row[4],
+        gradeLevel: row[6],
+        room: row[7]
+      });
+    }
+  }
+  return result;
+}
+
+/**
+ * บันทึก/แก้ไขผลการเข้าเรียน
+ * - ถ้ามีแถวเดิมของ (วันที่ + วิชา + ห้อง) อยู่ → ลบทิ้งก่อนแล้วเพิ่มใหม่
+ * - จึงแก้ไขย้อนหลังได้โดยไม่มีข้อมูลซ้ำ
+ */
+function saveSubjectAttendance(jsonPayload) {
+  try {
+    var payload = JSON.parse(jsonPayload);
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("Attendance_Subjects");
+
+    if (!sheet) {
+      sheet = ss.insertSheet("Attendance_Subjects");
+      sheet.appendRow([
+        "Timestamp", "Date", "SubjectCode", "SubjectName", "TeacherEmail",
+        "GradeLevel", "Room", "StudentID", "StudentName", "Status", "Note"
+      ]);
+    }
+
+    var lock = LockService.getScriptLock();
+    if (!lock.tryLock(10000)) {
+      return { status: "error", message: "ระบบกำลังทำงานอยู่ กรุณาลองใหม่" };
+    }
+
+    try {
+      var targetDate  = String(payload.date || "").trim();
+      var targetCode  = String(payload.subjectCode || "").trim();
+      var targetName  = String(payload.subjectName || "").trim();
+      var targetGrade = String(payload.gradeLevel || "").trim();
+      var targetRoom  = String(payload.room || "").trim();
+
+      // === 1. ลบแถวเดิมของ (วันที่ + วิชา + ห้อง) ===
+      var data = sheet.getDataRange().getValues();
+      var rowsToDelete = [];
+      for (var i = data.length - 1; i >= 1; i--) {
+        var row = data[i];
+        var rowDate  = formatDateStr(row[1]);
+        var rowCode  = String(row[2] || "").trim();
+        var rowName  = String(row[3] || "").trim();
+        var rowGrade = String(row[5] || "").trim();
+        var rowRoom  = String(row[6] || "").trim();
+
+        var codeMatch = targetCode !== ""
+          ? (rowCode === targetCode)
+          : (rowCode === "" && rowName === targetName);
+
+        if (rowDate === targetDate && codeMatch &&
+            rowGrade === targetGrade && rowRoom === targetRoom) {
+          rowsToDelete.push(i + 1); // 1-indexed
+        }
+      }
+      // ลบจากล่างขึ้นบน เพื่อไม่ให้ index เลื่อน
+      rowsToDelete.forEach(function (rowIdx) { sheet.deleteRow(rowIdx); });
+
+      // === 2. เพิ่มแถวใหม่ ===
+      var timestamp = new Date();
+      var rowsToAdd = [];
+      payload.students.forEach(function (stu) {
+        rowsToAdd.push([
+          timestamp,
+          targetDate,
+          targetCode,
+          targetName,
+          payload.teacherEmail,
+          targetGrade,
+          targetRoom,
+          stu.student_id,
+          stu.name,
+          stu.status,
+          stu.note || ""
+        ]);
+      });
+
+      if (rowsToAdd.length > 0) {
+        sheet.getRange(sheet.getLastRow() + 1, 1, rowsToAdd.length, rowsToAdd[0].length)
+             .setValues(rowsToAdd);
+      }
+
+      return {
+        status: "success",
+        message: rowsToDelete.length > 0
+          ? "อัปเดตผลการเข้าเรียนสำเร็จ"
+          : "บันทึกผลการเข้าเรียนสำเร็จ"
+      };
+    } finally {
+      lock.releaseLock();
+    }
+  } catch (err) {
+    return { status: "error", message: err.toString() };
+  }
+}
+/**
+ * Helper: แปลงวันที่ให้เป็น yyyy-MM-dd เสมอ
+ */
+function formatDateStr(d) {
+  if (!d) return "";
+  if (d instanceof Date) {
+    return Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  }
+  return String(d).trim().substring(0, 10);
+}
+
+/**
+ * ดึงผลการเข้าเรียนที่เคยบันทึกไว้ของ (วันที่ + วิชา + ห้อง)
+ * ใช้ pre-fill ฟอร์มตอนแก้ไขย้อนหลัง
+ */
+function getSubjectAttendanceForEdit(date, subjectCode, subjectName, gradeLevel, room) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("Attendance_Subjects");
+    if (!sheet) return { status: "success", data: [] };
+
+    var data = sheet.getDataRange().getValues();
+    if (data.length <= 1) return { status: "success", data: [] };
+
+    var targetDate  = formatDateStr(date);
+    var targetCode  = String(subjectCode || "").trim();
+    var targetName  = String(subjectName || "").trim();
+    var targetGrade = String(gradeLevel  || "").trim();
+    var targetRoom  = String(room        || "").trim();
+
+    var result = [];
+    for (var i = 1; i < data.length; i++) {
+      var row = data[i];
+      var rowDate  = formatDateStr(row[1]);
+      var rowCode  = String(row[2] || "").trim();
+      var rowName  = String(row[3] || "").trim();
+      var rowGrade = String(row[5] || "").trim();
+      var rowRoom  = String(row[6] || "").trim();
+
+      // ถ้ามีรหัสวิชา → match ด้วยรหัส, ถ้าไม่มี → match ด้วยชื่อ
+      var codeMatch = targetCode !== ""
+        ? (rowCode === targetCode)
+        : (rowCode === "" && rowName === targetName);
+
+      if (rowDate === targetDate && codeMatch &&
+          rowGrade === targetGrade && rowRoom === targetRoom) {
+        result.push({
+          student_id: String(row[7]  || "").trim(),
+          name:       String(row[8]  || "").trim(),
+          status:     String(row[9]  || "").trim(),
+          note:       String(row[10] || "").trim()
+        });
+      }
+    }
+
+    return { status: "success", data: result };
+  } catch (err) {
+    return { status: "error", message: err.toString(), data: [] };
+  }
+}
+
+function getTeacherSubjectSchedule(teacherEmail, targetDate) {
+  try {
+    Logger.log('📅 getTeacherSubjectSchedule: email="' + teacherEmail + '", date="' + targetDate + '"');
+
+    // ✅ ใช้ getSpreadsheet() ให้เหมือนระบบส่วนอื่น
+    var ss = getSpreadsheet();
+    var sheet = ss.getSheetByName("Timetable");
+    if (!sheet) {
+      Logger.log('⚠️ ไม่พบชีต Timetable');
+      return { status: "success", data: [], message: "ยังไม่มีชีต Timetable" };
+    }
+
+    var data = sheet.getDataRange().getValues();
+    Logger.log('📊 Timetable rows (รวม header): ' + data.length);
+
+    if (data.length <= 1) {
+      return { status: "success", data: [], message: "ชีต Timetable ว่าง" };
+    }
+
+    // ✅ แปลงวันที่แบบ local (กัน timezone เพี้ยน)
+    var dateObj;
+    if (targetDate) {
+      var p = String(targetDate).split('-');
+      dateObj = new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]));
+    } else {
+      dateObj = new Date();
+    }
+
+    var days = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์"];
+    var dayName = days[dateObj.getDay()];
+    var normEmail = String(teacherEmail || '').trim().toLowerCase();
+
+    Logger.log('🗓️ Day = ' + dayName + ', looking for email = "' + normEmail + '"');
+
+    var result = [];
+    var emailsInSheet = {};
+
+    for (var i = 1; i < data.length; i++) {
+      var row = data[i];
+      var rowDay = String(row[1] || '').trim();
+      var rowEmail = String(row[5] || '').trim();
+      var rowEmailNorm = rowEmail.toLowerCase();
+
+      if (rowEmailNorm) emailsInSheet[rowEmailNorm] = true;
+
+      if (rowDay === dayName && rowEmailNorm === normEmail) {
+        result.push({
+          timetableId: String(row[0] || ''),
+          period:      row[2],
+          subjectCode: String(row[3] || ''),
+          subjectName: String(row[4] || ''),
+          gradeLevel:  String(row[6] || ''),
+          room:        String(row[7] || ''),
+          classroomId: String(row[8] || '')
+        });
+      }
+    }
+
+    Logger.log('✅ พบ ' + result.length + ' คาบ | Emails ที่มีใน Timetable: ' + Object.keys(emailsInSheet).join(', '));
+
+    return { status: "success", data: result };
+
+  } catch (e) {
+    Logger.log('❌ Error in getTeacherSubjectSchedule: ' + e.message + '\n' + e.stack);
+    return { status: "error", message: e.message, data: [] };
+  }
+}
+
+// 2. ฟังก์ชันบันทึกข้อมูลการเช็คชื่อรายวิชาลงชีต Attendance_Subjects
+function saveSubjectAttendance(jsonPayload) {
+  try {
+    var payload = JSON.parse(jsonPayload);
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("Attendance_Subjects");
+    
+    // ถ้ายังไม่มีชีต ให้สร้างให้อัตโนมัติพร้อมหัวตาราง
+    if (!sheet) {
+      sheet = ss.insertSheet("Attendance_Subjects");
+      sheet.appendRow(["Timestamp", "Date", "SubjectCode", "SubjectName", "TeacherEmail", "GradeLevel", "Room", "StudentID", "StudentName", "Status", "Note"]);
+    }
+    
+    var timestamp = new Date();
+    var rowsToAdd = [];
+    
+    payload.students.forEach(function(stu) {
+      rowsToAdd.push([
+        timestamp,
+        payload.date,
+        payload.subjectCode,
+        payload.subjectName,
+        payload.teacherEmail,
+        payload.gradeLevel,
+        payload.room,
+        stu.student_id,
+        stu.name,
+        stu.status, // มา, ขาด, ลา, สาย
+        stu.note || ""
+      ]);
+    });
+    
+    if (rowsToAdd.length > 0) {
+      sheet.getRange(sheet.getLastRow() + 1, 1, rowsToAdd.length, rowsToAdd[0].length).setValues(rowsToAdd);
+      return { status: "success", message: "บันทึกผลการเข้าเรียนสำเร็จ" };
+    }
+    
+    return { status: "error", message: "ไม่พบข้อมูลรายชื่อนักเรียนสำหรับบันทึก" };
+  } catch (err) {
+    return { status: "error", message: err.toString() };
+  }
+}
+
+// ฟังก์ชันสรุปการเข้าเรียน (ปรับปรุงให้รองรับวิชาที่ไม่มีรหัสวิชา)
+function getSubjectAttendanceSummary(teacherIdentifier, subjectKey) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Attendance_Subjects");
+  if (!sheet) return { status: "error", message: "ยังไม่มีข้อมูล" };
+  
+  var data = sheet.getDataRange().getValues();
+  var summary = {}; 
+  
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var rowSubjCode = String(row[2]).trim();
+    var rowSubjName = String(row[3]).trim();
+    var rowTeacher = String(row[4]).trim();
+    
+    // ตรวจสอบวิชา (เช็คจากรหัสวิชาก่อน ถ้าไม่มีรหัสให้เช็คจากชื่อวิชา)
+    var matchSubject = false;
+    if (rowSubjCode !== "") {
+      matchSubject = (rowSubjCode === subjectKey);
+    } else {
+      matchSubject = (rowSubjName === subjectKey);
+    }
+    
+    if (matchSubject && rowTeacher.toLowerCase() === String(teacherIdentifier).toLowerCase()) {
+      var stuId = String(row[7]).trim();
+      if (!summary[stuId]) {
+        summary[stuId] = { id: stuId, name: String(row[8]).trim(), present: 0, absent: 0, leave: 0, late: 0, total: 0 };
+      }
+      var status = String(row[9]).trim();
+      if (status === "มา") summary[stuId].present++;
+      else if (status === "ขาด") summary[stuId].absent++;
+      else if (status === "ลา") summary[stuId].leave++;
+      else if (status === "สาย") summary[stuId].late++;
+      summary[stuId].total++;
+    }
+  }
+  var resultArray = Object.keys(summary).map(function(key) { return summary[key]; });
+  resultArray.sort(function(a, b) { return a.id.localeCompare(b.id); });
+  return { status: "success", data: resultArray };
+}
+
+// ฟังก์ชันดึงรายชื่อวิชาทั้งหมดที่ครูสอน (ปรับรูปแบบข้อความตามเงื่อนไขใหม่)
+function getTeacherSubjectsList(teacherIdentifier) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Timetable");
+  if (!sheet) return { status: "success", data: [] };
+  
+  var data = sheet.getDataRange().getValues();
+  var subjectsMap = {};
+  
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var rowTeacher = String(row[5]).trim();
+    
+    if (rowTeacher.toLowerCase() === String(teacherIdentifier).toLowerCase()) {
+      var subjCode = String(row[3]).trim();
+      var subjName = String(row[4]).trim();
+      var grade = String(row[6]).trim();
+      var room = String(row[7]).trim();
+      
+      // ✅ ข้อ 3: วิชาไหนไม่ระบุ ชั้น ไม่ต้องแสดง /1 (แสดงเฉพาะชั้น หรือเฉพาะห้องถ้ามีแค่อย่างเดียว)
+      var gradeRoom = "";
+      if (grade !== "" && room !== "") {
+        gradeRoom = grade + "/" + room;
+      } else if (grade !== "") {
+        gradeRoom = grade;
+      } else if (room !== "") {
+        gradeRoom = room;
+      }
+      
+      // ถ้าไม่มีรหัสวิชา ให้ใช้ชื่อวิชาเป็น Key แทนป้องกันบัค
+      var mapKey = subjCode !== "" ? subjCode : subjName;
+      
+      if(!subjectsMap[mapKey]) {
+        subjectsMap[mapKey] = { code: subjCode, name: subjName, classes: gradeRoom !== "" ? [gradeRoom] : [] };
+      } else if (gradeRoom !== "" && subjectsMap[mapKey].classes.indexOf(gradeRoom) === -1) {
+        subjectsMap[mapKey].classes.push(gradeRoom);
+      }
+    }
+  }
+  
+  var result = Object.keys(subjectsMap).map(function(key) {
+    var subj = subjectsMap[key];
+    
+    var displayName = subj.name;
+    // ✅ ข้อ 4: วิชาไหนไม่มีรหัส ไม่ต้องมีวงเล็บ ()
+    if (subj.code !== "") {
+      displayName += " (" + subj.code + ")";
+    }
+    
+    // ✅ ข้อ 2: หน้าสรุปรายวิชา ไม่ต้องมีคำว่า "สอนห้อง"
+    if (subj.classes.length > 0) {
+      displayName += " - " + subj.classes.join(', ');
+    }
+    
+    return { key: key, displayName: displayName };
+  });
+  
+  return { status: "success", data: result };
+}
+// ฟังก์ชันสำหรับสร้างฐานข้อมูลระบบเช็คชื่อรายวิชา (รันเพียงครั้งเดียว)
+function setupSubjectDatabase() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+  
+  try {
+    // ---------------------------------------------------------
+    // 1. สร้างชีต Timetable (ตารางสอน)
+    // ---------------------------------------------------------
+    var timetableSheet = ss.getSheetByName("Timetable");
+    if (!timetableSheet) {
+      timetableSheet = ss.insertSheet("Timetable");
+      var timetableHeaders = [
+        "TimetableID", "DayOfWeek", "Period", "SubjectCode", "SubjectName", 
+        "TeacherEmail", "GradeLevel", "Room", "ClassroomId"
+      ];
+      timetableSheet.appendRow(timetableHeaders);
+      
+      // จัดรูปแบบหัวตารางให้สวยงาม
+      timetableSheet.getRange(1, 1, 1, timetableHeaders.length)
+        .setFontWeight("bold")
+        .setBackground("#f9cb9c") // สีส้มอ่อน
+        .setHorizontalAlignment("center");
+        
+      // ตรึงแถวบนสุด
+      timetableSheet.setFrozenRows(1);
+      
+      // เพิ่มข้อมูลตัวอย่าง 1 บรรทัด เพื่อให้ครูดูเป็นแนวทาง
+      var exampleTeacherEmail = Session.getActiveUser().getEmail() || "teacher@namkham.ac.th";
+      timetableSheet.appendRow([
+        "T001", "จันทร์", 1, "ว23101", "วิทยาศาสตร์", 
+        exampleTeacherEmail, "ม.3", "1", "m3_1"
+      ]);
+      
+      // ปรับขนาดคอลัมน์อัตโนมัติ
+      timetableSheet.autoResizeColumns(1, timetableHeaders.length);
+    }
+
+    // ---------------------------------------------------------
+    // 2. สร้างชีต Attendance_Subjects (บันทึกผลการเข้าเรียน)
+    // ---------------------------------------------------------
+    var attendanceSheet = ss.getSheetByName("Attendance_Subjects");
+    if (!attendanceSheet) {
+      attendanceSheet = ss.insertSheet("Attendance_Subjects");
+      var attendanceHeaders = [
+        "Timestamp", "Date", "SubjectCode", "SubjectName", "TeacherEmail", 
+        "GradeLevel", "Room", "StudentID", "StudentName", "Status", "Note"
+      ];
+      attendanceSheet.appendRow(attendanceHeaders);
+      
+      // จัดรูปแบบหัวตารางให้สวยงาม
+      attendanceSheet.getRange(1, 1, 1, attendanceHeaders.length)
+        .setFontWeight("bold")
+        .setBackground("#d9ead3") // สีเขียวอ่อน
+        .setHorizontalAlignment("center");
+        
+      // ตรึงแถวบนสุด
+      attendanceSheet.setFrozenRows(1);
+      
+      // ปรับขนาดคอลัมน์อัตโนมัติ
+      attendanceSheet.autoResizeColumns(1, attendanceHeaders.length);
+    }
+    
+    ui.alert('✅ สำเร็จ!', 'สร้างชีต "Timetable" และ "Attendance_Subjects" เรียบร้อยแล้ว\n\nกรุณาไปที่ Google Sheets เพื่อแก้ไขข้อมูลตารางสอนตัวอย่างให้เป็นข้อมูลจริงครับ', ui.ButtonSet.OK);
+    
+  } catch (error) {
+    ui.alert('❌ เกิดข้อผิดพลาด', error.toString(), ui.ButtonSet.OK);
+  }
+}
+/**
+ * ดึงรายชื่อนักเรียนของห้องเรียนหนึ่งๆ (ใช้โดย subject_attendance.html)
+ * @param {string} classroomId - รหัสห้องเรียน เช่น "m1-1", "m3_1"
+ * @returns {{students: Array}}
+ */
+function getClassroomStudents(classroomId) {
+  try {
+    if (!classroomId) {
+      return { students: [] };
+    }
+
+    // เรียกใช้ getStudents() ที่มีอยู่แล้วในระบบ
+    const res = getStudents([String(classroomId).trim()]);
+    if (!res || res.status !== 'success') {
+      return { students: [] };
+    }
+
+    // getStudents คืนค่าเป็น { classroomId: [student,...] }
+    const students = (res.data && res.data[classroomId]) ? res.data[classroomId] : [];
+
+    return { students: students };
+  } catch (e) {
+    Logger.log('Error in getClassroomStudents: ' + e.message);
+    return { students: [], error: e.message };
+  }
+}
+function diagnoseSubjectAttendance() {
+  var ss = getSpreadsheet();
+  var out = [];
+
+  // 1. Timetable
+  var tSheet = ss.getSheetByName("Timetable");
+  if (!tSheet) {
+    out.push("❌ ไม่พบชีต Timetable");
+  } else {
+    var tData = tSheet.getDataRange().getValues();
+    out.push("✅ Timetable: " + tData.length + " rows");
+    if (tData.length > 0) out.push("   Headers: " + JSON.stringify(tData[0]));
+    if (tData.length > 1) out.push("   Sample : " + JSON.stringify(tData[1]));
+
+    var emails = {};
+    var days = {};
+    for (var i = 1; i < tData.length; i++) {
+      var e = String(tData[i][5] || '').trim();
+      var d = String(tData[i][1] || '').trim();
+      if (e) emails[e] = (emails[e] || 0) + 1;
+      if (d) days[d] = (days[d] || 0) + 1;
+    }
+    out.push("   TeacherEmails ใน Timetable: " + JSON.stringify(emails));
+    out.push("   Days ใน Timetable: " + JSON.stringify(days));
+  }
+
+  // 2. Teachers
+  var teachSheet = ss.getSheetByName("Teachers");
+  if (teachSheet) {
+    var tData2 = teachSheet.getDataRange().getValues();
+    var users = tData2.slice(1).map(function(r){ return String(r[2]||'').trim(); });
+    out.push("✅ Teachers (usernames): " + JSON.stringify(users));
+  }
+
+  // 3. ทดสอบเรียกจริง
+  var testEmail = "somchai"; // ⬅️ เปลี่ยนเป็น username ของครูที่จะทดสอบ
+  var testDate = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  var res = getTeacherSubjectSchedule(testEmail, testDate);
+  out.push("🧪 Test: email=" + testEmail + ", date=" + testDate);
+  out.push("   → " + JSON.stringify(res));
+
+  Logger.log(out.join('\n'));
+  return out.join('\n');
 }
