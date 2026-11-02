@@ -753,63 +753,6 @@
         }
     }   
 
-    function openCleaningModal() {
-        if ($('#cleaning-modal').length === 0) {
-            $('body').append(`
-                <div id="cleaning-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" style="display:none;">
-                    <div class="app-card w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden bg-white shadow-2xl rounded-3xl">
-                        <div class="flex justify-between items-center p-5 bg-gray-900 text-white">
-                            <h2 class="text-lg font-bold">ระบบเขตพื้นที่</h2>
-                            <button type="button" class="text-gray-400 hover:text-white text-2xl font-bold leading-none" onclick="$('#cleaning-modal').hide()">×</button>
-                        </div>
-                        <div class="relative flex-grow w-full h-[80vh]">
-                             <iframe id="cleaning-frame" class="w-full h-full border-none"></iframe>
-                        </div>
-                    </div>
-                </div>
-            `);
-        }
-
-        $.LoadingOverlay("show", { text: "กำลังโหลดระบบเขตพื้นที่..." });
-        
-        google.script.run
-            .withSuccessHandler(function(html) {
-                const frame = document.getElementById('cleaning-frame');
-                const doc = frame.contentWindow.document;
-                doc.open();
-                doc.write(html);
-                doc.close();
-
-                // 💡 [เพิ่มระบบหน่วงเวลาและดักจับความพร้อมของ google object ให้ iframe]
-                let checkReady = setInterval(() => {
-                    if (frame.contentWindow && frame.contentWindow.google && frame.contentWindow.google.script) {
-                        clearInterval(checkReady);
-                        try {
-                            const teacherData = localStorage.getItem('teacher');
-                            if(teacherData) {
-                                frame.contentWindow.localStorage.setItem('teacher', teacherData);
-                            }
-                        } catch(e) { console.error("Error passing user data", e); }
-                        
-                        $.LoadingOverlay("hide");
-                        $('#cleaning-modal').css('display', 'flex');
-                    }
-                }, 100);
-
-                // ป้องกันกรณีโหลดนานเกิน 5 วินาที ให้บังคับแสดงผลหน้าต่างทันที
-                setTimeout(() => {
-                    clearInterval(checkReady);
-                    $.LoadingOverlay("hide");
-                    $('#cleaning-modal').css('display', 'flex');
-                }, 5000);
-
-            })
-            .withFailureHandler(function(err){
-                $.LoadingOverlay("hide");
-                Swal.fire('Error', 'ไม่สามารถโหลดหน้าต่างเขตพื้นที่ได้: ' + err.message, 'error');
-            })
-            .include('cleaning');
-    }
 
     function updateRowColor(selectElement) {
         try {
@@ -1001,27 +944,30 @@
             // ปรับแต่ง Tab Action สำหรับ Mobile Bottom Nav
             $(".nav-tab").click(function() {
                 try {
-                    // ป้องกันการทำงานทับซ้อนถ้ารหัสเป็นการเปิดลิงก์แบบใหม่ (เช่นหน้าสถิติ)
                     if ($(this).attr('target') === '_blank') return;
                     const tabId = $(this).data("tab");
                     if (!tabId) return;
-                    
+
                     $(".nav-tab").removeClass("active");
                     $(this).addClass("active");
                     $(".tab-content").removeClass("active").hide();
                     $("#" + tabId).addClass("active").show();
-                    
+
                     if (tabId === "attendance") {
                         const date = $("#attendance-date").val() || TODAY;
                         const period = $("#period-buttons .period-btn.active").data("period") || 'morning';
                         loadClassroomsTable(date, period);
+                    } else if (tabId === "cleaning") {
+                        const date = $("#cleaning-date").val() || TODAY;
+                        loadCleaningTable(date);
+                    } else if (tabId === "cleaning-summary") {
+                        loadCleaningSummary();
                     } else if (tabId === "classroom-summary") {
                         loadClassroomSummary();
                     } else if (tabId === "overall-summary") {
                         loadOverallSummary();
                     }
-                    
-                    // ป้องกันการลากขึ้นลากลงแล้วเด้งกลับสุดจอเวลาสลับ Tab
+
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                 } catch (error) {
                     console.error('Tab click error:', error);
@@ -1044,6 +990,15 @@
                     saveSelectedDate("attendance-date", dateStr);
                     checkDateAndPeriod();
                     updateFormStdCheckTitle();
+                }
+            });
+            flatpickr("#cleaning-date", {
+                dateFormat: "Y-m-d",
+                locale: "th",
+                defaultDate: checkDateExpiration("cleaning-date", TODAY),
+                onChange: function(selectedDates, dateStr) {
+                    saveSelectedDate("cleaning-date", dateStr);
+                    loadCleaningTable(dateStr);
                 }
             });
             flatpickr("#summary-date", {
@@ -1131,35 +1086,29 @@ function getWeekDates(selectedDate) {
 }
 
 // 2. ฟังก์ชันวาดแถบสถานะ จ. - ศ. (ตามรูป)
-function buildWeeklyStatusHtml(roomId, classroomName, weekDates, statusMap, isResponsible) {
-  // ถ้าครูไม่มีสิทธิ์รับผิดชอบห้องนี้ ไม่ต้องแสดงแถบสถานะใดๆ ตามปกติ
-  if (!isResponsible) {
-    return '';
-  }
+function buildWeeklyStatusHtml(roomId, classroomName, weekDates, statusMap, isResponsible, type) {
+  if (!isResponsible) return '';
+  type = type || 'attendance';
 
   const dayNames = ['จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.'];
   let html = '<div class="flex items-center space-x-2 text-sm font-medium justify-center">';
-  
+
   weekDates.forEach((date, index) => {
-    // เช็คว่าใน statusMap มีข้อมูลของห้องนี้ และ วันนี้ หรือยัง
     const isChecked = statusMap[roomId] && statusMap[roomId][date];
-    
-    // กำหนดรูปแบบเมื่อเอาเมาส์ชี้ (cursor-pointer และ hover) เพื่อให้รู้ว่าคลิกได้
-    const clickableStyle = `cursor: pointer; transition: transform 0.1s;`
+    const clickableStyle = 'cursor: pointer; transition: transform 0.1s;';
     const hoverAttr = `onmouseover="this.style.transform='scale(1.2)'" onmouseout="this.style.transform='scale(1)'"`;
-    
-    // เมื่อคลิกที่สัญลักษณ์ของวันใด จะเรียกฟังก์ชันพาไปเช็คชื่อย้อนหลังของวันนั้น
-    const clickAction = `onclick="goToDateAndCheck('${date}', '${roomId}', '${classroomName}')"`;
+
+    const clickAction = type === 'cleaning'
+      ? `onclick="goToCleaningDateAndCheck('${date}', '${roomId}', '${classroomName}')"`
+      : `onclick="goToDateAndCheck('${date}', '${roomId}', '${classroomName}')"`;
 
     if (isChecked) {
-      // เช็คแล้ว (สีเขียว ✓ พร้อมคลิกแก้ไของค์ประกอบได้)
-      html += `<span class="text-gray-700 select-none" title="คลิกเพื่อดู/แก้ไขการเช็คชื่อวันที่ ${date}" ${clickAction} ${hoverAttr} style="${clickableStyle}">${dayNames[index]}<span class="text-green-500 font-bold ml-0.5">✓</span></span>`;
+      html += `<span class="text-gray-700 select-none" title="คลิกเพื่อดู/แก้ไข ${date}" ${clickAction} ${hoverAttr} style="${clickableStyle}">${dayNames[index]}<span class="text-emerald-500 font-bold ml-0.5">✓</span></span>`;
     } else {
-      // ยังไม่เช็ค (สีแดง ⚡ คลิกเพื่อย้อนไปเช็คได้ทันที)
-      html += `<span class="text-gray-700 select-none" title="ยังไม่ได้เช็ค! คลิกเพื่อย้อนกลับไปเช็คชื่อวันที่ ${date}" ${clickAction} ${hoverAttr} style="${clickableStyle}">${dayNames[index]}<span class="text-red-500 font-bold ml-0.5">⚡</span></span>`;
+      html += `<span class="text-gray-700 select-none" title="ยังไม่ได้เช็ค ${date}" ${clickAction} ${hoverAttr} style="${clickableStyle}">${dayNames[index]}<span class="text-red-500 font-bold ml-0.5">⚡</span></span>`;
     }
   });
-  
+
   html += '</div>';
   return html;
 }
@@ -1190,7 +1139,7 @@ function openSubjectAttendanceModal() {
            class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
            style="display:none;">
         <div class="app-card w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden bg-white shadow-2xl rounded-3xl">
-          <div class="flex justify-between items-center p-5 bg-gradient-to-r from-orange-500 to-amber-600 text-white">
+          <div class="flex justify-between items-center p-5 bg-gradient-to-r from-blue-700 to-indigo-800 text-white">
             <h2 class="text-lg font-bold">📚 เช็คชื่อเข้าเรียนรายวิชา</h2>
             <button type="button"
                     class="text-white hover:text-gray-200 text-2xl font-bold leading-none"
@@ -1287,4 +1236,144 @@ $('.nav-tab[data-tab="subject-summary"]').click(function() {
       }
     }).getSubjectAttendanceSummary(teacherIdentifier, subjectCode);
   });
+
+
+// CLEANING TAB — Phase 1
+// ========================================
+
+async function loadCleaningTable(date) {
+  try {
+    $.LoadingOverlay("show", { text: "กำลังโหลดตารางเขตพื้นที่..." });
+    $("#cleaning-empty").show();
+    $("#cleaning-table-container").hide();
+
+    const teacher = JSON.parse(localStorage.getItem("teacher") || "null");
+    const allowedClassroomIds = teacher && teacher.classroom_ids
+      ? (Array.isArray(teacher.classroom_ids) ? teacher.classroom_ids : teacher.classroom_ids.split(',').map(id => id.trim()))
+      : [];
+
+    if (!ALL_CLASSROOMS || ALL_CLASSROOMS.length === 0) {
+      await loadAllClassroomsAndStudents();
+    }
+
+    if (!ALL_CLASSROOMS || !ALL_CLASSROOMS.length) {
+      $.LoadingOverlay("hide");
+      Swal.fire('ไม่มีห้องเรียน', 'ไม่พบข้อมูลห้องเรียน', 'warning');
+      return;
+    }
+
+    // Weekly status
+    const weekDates = getWeekDates(date);
+    const weeklyResponse = await runGoogleScript('getCleaningWeeklyStatus', weekDates);
+    const statusMap = (weeklyResponse.status === 'success') ? weeklyResponse.data : {};
+
+    const tbody = $("#cleaning-list");
+    tbody.empty();
+    const fragment = document.createDocumentFragment();
+
+    const tableData = ALL_CLASSROOMS.map(classroom => {
+      const studentCountEntry = ALL_STUDENT_COUNTS.find(sc => sc.room_id === classroom.id);
+      return {
+        classroomId: classroom.id,
+        classroom: classroom.name || classroom.id,
+        studentCount: studentCountEntry ? studentCountEntry.count : 0,
+        isResponsible: allowedClassroomIds.includes(classroom.id)
+      };
+    });
+
+    tableData.sort((a, b) => a.classroom.localeCompare(b.classroom, 'th'));
+
+    tableData.forEach(entry => {
+      const weeklyHtml = buildWeeklyStatusHtml(
+        entry.classroomId, entry.classroom, weekDates, statusMap, entry.isResponsible, 'cleaning'
+      );
+
+      const actionCell = entry.isResponsible
+        ? `<button class="cleaning-check-btn px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-700 text-white rounded-xl shadow-md hover:shadow-lg text-sm font-bold active:scale-95 transition"
+                  data-classroom-id="${entry.classroomId}" data-classroom-name="${entry.classroom}">
+            เช็คเขตพื้นที่
+          </button>`
+        : '<span class="text-xs text-gray-400">—</span>';
+
+      const row = document.createElement('tr');
+      row.className = 'hover:bg-blue-50 transition-colors border-b border-gray-100';
+      row.innerHTML = `
+        <td class="px-4 py-4 text-left font-bold text-gray-700">${entry.classroom}</td>
+        <td class="px-4 py-4 text-center text-gray-500">${entry.studentCount}</td>
+        <td class="px-4 py-4 text-center">${weeklyHtml}</td>
+        <td class="px-4 py-4 text-center">${actionCell}</td>
+      `;
+      fragment.appendChild(row);
+    });
+
+    tbody[0].appendChild(fragment);
+    $("#cleaning-empty").hide();
+    $("#cleaning-table-container").removeClass("hidden").show();
+    updateCleaningTitle(date);
+
+    $(".cleaning-check-btn").click(function() {
+      openCleaningModal(date, $(this).data("classroom-id"), $(this).data("classroom-name"));
+    });
+
+    $.LoadingOverlay("hide");
+  } catch (error) {
+    $.LoadingOverlay("hide");
+    console.error('Error in loadCleaningTable:', error);
+    Swal.fire('ข้อผิดพลาด', error.message, 'error');
+  }
+}
+
+function updateCleaningTitle(date) {
+  $("#cleaning-title").html(`
+    <span class="text-base text-gray-600">🧹 เขตพื้นที่</span><br>
+    <span class="text-xs text-gray-500">${formatDateThai(date)}</span>
+  `);
+}
+
+function openCleaningModal(date, classroomId, classroomName) {
+  if ($('#cleaning-modal').length === 0) {
+    $('body').append(`
+      <div id="cleaning-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" style="display:none;">
+        <div class="app-card w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden bg-white shadow-2xl rounded-3xl">
+          <div class="flex justify-between items-center p-5 bg-gradient-to-r from-blue-800 to-indigo-900 text-white">
+            <h2 id="cleaning-modal-title" class="text-lg font-bold">🧹 เช็คเขตพื้นที่</h2>
+            <button type="button" class="text-white hover:text-gray-200 text-2xl font-bold leading-none" onclick="$('#cleaning-modal').hide()">×</button>
+          </div>
+          <div class="relative flex-grow w-full" style="height: 80vh;">
+            <iframe id="cleaning-frame" class="w-full h-full border-none"></iframe>
+          </div>
+        </div>
+      </div>
+    `);
+  }
+
+  $("#cleaning-modal-title").text(`🧹 เช็คเขตพื้นที่ — ${classroomName} (${formatDateThai(date)})`);
+
+  $.LoadingOverlay("show", { text: "กำลังโหลดระบบเขตพื้นที่..." });
+
+  google.script.run
+    .withSuccessHandler(function(url) {
+      const iframe = document.getElementById('cleaning-frame');
+      iframe.src = url + '?page=cleaning&date=' + encodeURIComponent(date) +
+                   '&room=' + encodeURIComponent(classroomId) + '&t=' + Date.now();
+      iframe.onload = function() {
+        $.LoadingOverlay("hide");
+        $('#cleaning-modal').css('display', 'flex');
+      };
+    })
+    .withFailureHandler(function(err) {
+      $.LoadingOverlay("hide");
+      Swal.fire('Error', 'ไม่สามารถโหลดได้: ' + err.message, 'error');
+    })
+    .getScriptUrl();
+}
+
+function goToCleaningDateAndCheck(dateStr, classroomId, classroomName) {
+  $("#cleaning-date").val(dateStr);
+  saveSelectedDate("cleaning-date", dateStr);
+  const dateInput = document.getElementById('cleaning-date');
+  if (dateInput && dateInput._flatpickr) dateInput._flatpickr.setDate(dateStr);
+  openCleaningModal(dateStr, classroomId, classroomName);
+}
+
 </script>

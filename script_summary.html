@@ -837,4 +837,152 @@
     // Removed downloadOverallPdf function
     // Removed printOverall function
 
+
+
+// CLEANING SUMMARY
+// ========================================
+
+async function loadCleaningSummary() {
+  try {
+    $("#cleaning-summary-empty").show();
+    $("#cleaning-summary-content").addClass("hidden");
+
+    // Default: ต้นเดือน → วันนี้
+    const today = TODAY;
+    const start = today.slice(0, 7) + '-01';
+
+    if (!$("#cleaning-summary-start").val()) {
+      $("#cleaning-summary-start").val(start);
+      flatpickr("#cleaning-summary-start", {
+        dateFormat: "Y-m-d", locale: "th", defaultDate: start
+      });
+    }
+    if (!$("#cleaning-summary-end").val()) {
+      $("#cleaning-summary-end").val(today);
+      flatpickr("#cleaning-summary-end", {
+        dateFormat: "Y-m-d", locale: "th", defaultDate: today
+      });
+    }
+
+    // Load classroom dropdown (เฉพาะครั้งแรก)
+    if ($("#cleaning-summary-room option").length <= 1) {
+      const cr = await runGoogleScript('getClassrooms', []);
+      if (cr.status === 'success') {
+        cr.data.forEach(c => {
+          $("#cleaning-summary-room").append(`<option value="${c.id}">${c.name}</option>`);
+        });
+      }
+    }
+
+    // Bind run button
+    $("#cleaning-summary-run").off("click").on("click", runCleaningSummary);
+  } catch (error) {
+    console.error('Error in loadCleaningSummary:', error);
+  }
+}
+
+async function runCleaningSummary() {
+  const startDate = $("#cleaning-summary-start").val();
+  const endDate = $("#cleaning-summary-end").val();
+  const classroomId = $("#cleaning-summary-room").val() || "";
+
+  if (!startDate || !endDate) {
+    Swal.fire('แจ้งเตือน', 'กรุณาเลือกช่วงวันที่', 'warning');
+    return;
+  }
+  if (startDate > endDate) {
+    Swal.fire('แจ้งเตือน', 'วันที่เริ่มต้นต้องไม่มากกว่าวันที่สิ้นสุด', 'warning');
+    return;
+  }
+
+  $.LoadingOverlay("show", { text: "กำลังประมวลผล..." });
+  try {
+    const res = await runGoogleScript('getCleaningStats', {
+      startDate, endDate, classroom_id: classroomId
+    });
+
+    if (res.status !== 'success') throw new Error(res.message);
+
+    renderCleaningSummary(res.data);
+    $("#cleaning-summary-empty").hide();
+    $("#cleaning-summary-content").removeClass("hidden");
+  } catch (error) {
+    console.error('Error:', error);
+    Swal.fire('ผิดพลาด', error.message, 'error');
+  } finally {
+    $.LoadingOverlay("hide");
+  }
+}
+
+function renderCleaningSummary(data) {
+  // ===== Summary Cards =====
+  $("#clean-stat-avg").text((data.avgScore || 0) + '%');
+  $("#clean-stat-total").text((data.scoreDetails || []).length);
+
+  // Top room
+  const roomScores = {};
+  (data.scoreDetails || []).forEach(d => {
+    if (!roomScores[d.classroom_id]) roomScores[d.classroom_id] = [];
+    const [s, m] = String(d.total_score).split('/').map(Number);
+    if (!isNaN(s) && !isNaN(m) && m > 0) roomScores[d.classroom_id].push((s / m) * 100);
+  });
+  let topRoom = '-';
+  let topAvg = 0;
+  for (const room in roomScores) {
+    const avg = roomScores[room].reduce((a, b) => a + b, 0) / roomScores[room].length;
+    if (avg > topAvg) {
+      topAvg = avg;
+      const found = ALL_CLASSROOMS.find(c => c.id === room);
+      topRoom = found ? found.name : room;
+    }
+  }
+  $("#clean-stat-top-room").text(topRoom);
+
+  // ===== Top 5 Students =====
+  const topTbody = $("#clean-top-students");
+  topTbody.empty();
+  if (!data.topStudents || data.topStudents.length === 0) {
+    topTbody.append('<tr><td colspan="3" class="text-center p-4 text-gray-400">ไม่มีข้อมูล</td></tr>');
+  } else {
+    // map student_id → name (จาก CONFIG.students ถ้ามี)
+    const nameMap = {};
+    for (const room in (window.CONFIG_STUDENTS || {})) {
+      (window.CONFIG_STUDENTS[room] || []).forEach(s => {
+        nameMap[String(s.student_id)] = s.name;
+      });
+    }
+
+    data.topStudents.forEach((s, i) => {
+      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`;
+      const realName = nameMap[String(s.name)] || s.name;
+      topTbody.append(`
+        <tr class="border-b border-gray-100 hover:bg-blue-50">
+          <td class="p-3 font-semibold text-gray-700">${medal}</td>
+          <td class="p-3 text-gray-800">${realName}</td>
+          <td class="p-3 text-center font-bold text-emerald-600">${s.done} ครั้ง</td>
+        </tr>
+      `);
+    });
+  }
+
+  // ===== Details =====
+  const detailTbody = $("#clean-details-list");
+  detailTbody.empty();
+  if (!data.scoreDetails || data.scoreDetails.length === 0) {
+    detailTbody.append('<tr><td colspan="4" class="text-center p-4 text-gray-400">ไม่มีข้อมูล</td></tr>');
+  } else {
+    data.scoreDetails.forEach(d => {
+      const roomName = (ALL_CLASSROOMS.find(c => c.id === d.classroom_id) || {}).name || d.classroom_id;
+      detailTbody.append(`
+        <tr class="border-b border-gray-100 hover:bg-blue-50">
+          <td class="p-3 text-gray-600">${d.date}</td>
+          <td class="p-3 font-semibold text-gray-800">${roomName}</td>
+          <td class="p-3 text-gray-600">${d.checker}</td>
+          <td class="p-3 text-center font-bold text-blue-700">${d.total_score}</td>
+        </tr>
+      `);
+    });
+  }
+}
+
 </script>

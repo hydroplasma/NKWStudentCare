@@ -1761,6 +1761,87 @@ function getClassroomStudents(classroomId) {
     return { students: [], error: e.message };
   }
 }
+
+// CLEANING — Tab-based UI Extensions
+// ========================================
+
+/**
+ * ดึงสถานะรายสัปดาห์ (จ.-ศ.) ของ cleaning
+ * ใช้สร้างแถบ ✓ ⚡ ในตาราง Cleaning Tab
+ */
+function getCleaningWeeklyStatus(weekDates) {
+  try {
+    const sheet = getOrCreateSheet(CLEANING_SHEET_NAMES.ATTENDANCE);
+    const data = sheet.getDataRange().getValues();
+    const statusMap = {};
+
+    const fmt = (d) => {
+      if (!d) return "";
+      if (d instanceof Date) return Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-MM-dd");
+      return String(d).trim();
+    };
+
+    // clean duplicates (เก็บแถวล่างสุด = ล่าสุด)
+    const cleaned = getCleanedCleaningRows(data);
+    cleaned.forEach(row => {
+      const rowDate = fmt(row[0]);
+      const rowRoom = String(row[1]).trim();
+      if (weekDates.includes(rowDate) && rowRoom) {
+        if (!statusMap[rowRoom]) statusMap[rowRoom] = {};
+        statusMap[rowRoom][rowDate] = true;
+      }
+    });
+
+    return createResponse('success', 'Cleaning weekly status retrieved', statusMap);
+  } catch (error) {
+    Logger.log('Error in getCleaningWeeklyStatus: ' + error.message);
+    return createResponse('error', 'Failed: ' + error.message, null, error);
+  }
+}
+
+/**
+ * ดึงข้อมูล cleaning ของ (date + classroom) เพื่อ pre-fill modal
+ */
+function getCleaningDataForEdit(date, classroomId) {
+  try {
+    const ss = getSpreadsheet();
+    const fmt = (d) => {
+      if (!d) return "";
+      if (d instanceof Date) return Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-MM-dd");
+      return String(d).trim();
+    };
+
+    let studentData = [];
+    let scores = {};
+    let hasExisting = false;
+
+    const attSheet = ss.getSheetByName(CLEANING_SHEET_NAMES.ATTENDANCE);
+    if (attSheet) {
+      const cleaned = getCleanedCleaningRows(attSheet.getDataRange().getValues());
+      const row = cleaned.find(r => fmt(r[0]) === date && String(r[1]).trim() === classroomId);
+      if (row) {
+        try { studentData = JSON.parse(row[3] || '[]'); } catch(e) {}
+        hasExisting = true;
+      }
+    }
+
+    const scoreSheet = ss.getSheetByName(CLEANING_SHEET_NAMES.SCORES);
+    if (scoreSheet) {
+      const cleaned = getCleanedCleaningRows(scoreSheet.getDataRange().getValues());
+      const row = cleaned.find(r => fmt(r[0]) === date && String(r[1]).trim() === classroomId);
+      if (row) {
+        try { scores = JSON.parse(row[3] || '{}'); } catch(e) {}
+        hasExisting = true;
+      }
+    }
+
+    return createResponse('success', 'Cleaning data', { studentData, scores, hasExisting });
+  } catch (error) {
+    Logger.log('Error in getCleaningDataForEdit: ' + error.message);
+    return createResponse('error', error.message, { studentData: [], scores: {}, hasExisting: false }, error);
+  }
+}
+
 function diagnoseSubjectAttendance() {
   var ss = getSpreadsheet();
   var out = [];

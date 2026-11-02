@@ -8,9 +8,9 @@
   <title>ระบบเช็คชื่อนักเรียนเข้าร่วมกิจกรรม</title>
   <?!= include('lib') ?>
   <style>
-    /* Banking App Theme - Orange/White/Black */
+    /* Blue/Navy/Indigo/White Theme */
     body {
-      background-color: #f5f5f5;
+      background-color: #eff6ff;
     }
 
     .nav-tabs-container {
@@ -38,9 +38,9 @@
     }
 
     .nav-tab.active {
-      background-color: #f97316;
+      background-color: #2563eb;
       color: white;
-      box-shadow: 0 6px 12px rgba(249, 115, 22, 0.25);
+      box-shadow: 0 6px 12px rgba(37, 99, 235, 0.25);
     }
 
     .app-card {
@@ -62,8 +62,8 @@
     input:focus,
     select:focus {
       background-color: #ffffff !important;
-      border-color: #f97316 !important;
-      box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.2) !important;
+      border-color: #2563eb !important;
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2) !important;
     }
 
     .period-btn {
@@ -77,9 +77,9 @@
     }
 
     .period-btn.active {
-      background: linear-gradient(135deg, #f97316 0%, #ea580c 100%) !important;
+      background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%) !important;
       color: white !important;
-      box-shadow: 0 4px 12px rgba(249, 115, 22, 0.4);
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
       border: none;
     }
 
@@ -155,22 +155,22 @@
     }
 
     thead th {
-      background-color: #f97316;
+      background-color: #2563eb;
       color: white;
       font-weight: 600;
     }
 
     tbody tr:hover {
-      background-color: #fff7ed;
+      background-color: #eff6ff;
     }
 
     .btn-save {
-      background: linear-gradient(135deg, #f97316, #ea580c);
+      background: linear-gradient(135deg, #2563eb, #1e40af);
       color: white;
       border-radius: 40px;
       padding: 12px 24px;
       font-weight: bold;
-      box-shadow: 0 4px 12px rgba(249, 115, 22, 0.3);
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
       transition: all 0.2s;
     }
 
@@ -179,7 +179,7 @@
     }
 
     footer a {
-      color: #f97316;
+      color: #2563eb;
       text-decoration: none;
     }
 
@@ -297,18 +297,18 @@
 <body class="text-gray-800">
 
   <div id="login-page" class="min-h-screen flex items-center justify-center p-4"
-    style="background: linear-gradient(145deg, #2d1a0e 0%, #1f1a17 100%);">
+    style="background: linear-gradient(145deg, #0f172a 0%, #1e3a8a 100%);">
     <div
       class="bg-white/95 backdrop-blur-xl p-6 sm:p-8 rounded-[2rem] shadow-2xl w-full max-w-md relative overflow-hidden">
-      <div class="absolute -top-20 -right-20 w-40 h-40 bg-orange-400 rounded-full blur-3xl opacity-20"></div>
-      <div class="absolute -bottom-20 -left-20 w-40 h-40 bg-amber-500 rounded-full blur-3xl opacity-20"></div>
+      <div class="absolute -top-20 -right-20 w-40 h-40 bg-blue-400 rounded-full blur-3xl opacity-20"></div>
+      <div class="absolute -bottom-20 -left-20 w-40 h-40 bg-indigo-500 rounded-full blur-3xl opacity-20"></div>
       <div class="flex justify-center mb-4">
         <img id="login-logo" src="" alt="Logo" class="h-24 w-auto object-contain" onerror="this.src='https://i.postimg.cc/RZ0PCqVy/NKW-LOGO.png'">
       </div>
       <h1 id="login-system-name" class="text-2xl font-extrabold text-center text-gray-900 mb-1"></h1>
       <h2 id="login-school-name" class="text-sm text-center text-gray-500 mb-4"></h2>
-      <div class="bg-orange-50 border border-orange-200 rounded-2xl p-3 mb-6">
-        <h2 class="text-xs text-center text-orange-700 font-medium">ครูที่ปรึกษาเช็คกิจกรรมหน้าเสาธง<br>หัวหน้าห้อง/ตัวแทนเช็คเข้าแถวตอนเที่ยง
+      <div class="bg-blue-50 border border-blue-200 rounded-2xl p-3 mb-6">
+        <h2 class="text-xs text-center text-blue-800 font-medium">ครูที่ปรึกษาเช็คกิจกรรมหน้าเสาธง<br>หัวหน้าห้อง/ตัวแทนเช็คเข้าแถวตอนเที่ยง
         </h2>
       </div>
       <form id="login-form" class="space-y-5">
@@ -320,14 +320,14 @@
           <label class="block text-gray-600 text-sm font-bold mb-1 ml-1">🔑 รหัสผ่าน</label>
           <input type="password" id="password" class="w-full" placeholder="ระบุรหัสผ่าน">
         </div>
-        <button type="submit" class="w-full bg-gradient-to-r from-orange-500 to-amber-600 text-white py-4 rounded-2xl font-bold text-lg shadow-lg transition active:scale-95">เข้าสู่ระบบ</button>
+        <button type="submit" class="w-full bg-gradient-to-r from-blue-700 to-indigo-800 text-white py-4 rounded-2xl font-bold text-lg shadow-lg transition active:scale-95">เข้าสู่ระบบ</button>
       </form>
       <p id="login-copyright" class="text-center text-gray-400 text-xs mt-6"></p>
     </div>
   </div>
 
   <div id="main-page" class="hidden min-h-screen pb-10">
-    <header class="bg-gradient-to-b from-orange-800 to-amber-700 text-white pb-16 pt-6 px-4 rounded-b-[2rem] shadow-lg">
+    <header class="bg-gradient-to-b from-blue-900 to-indigo-900 text-white pb-16 pt-6 px-4 rounded-b-[2rem] shadow-lg">
       <div class="max-w-7xl mx-auto">
         <div class="flex justify-between items-center mb-4">
           <div class="flex items-center gap-3">
@@ -335,7 +335,7 @@
               <span class="text-xl">👨‍🏫</span>
             </div>
             <div>
-              <p class="text-orange-200 text-xs">ยินดีต้อนรับ</p>
+              <p class="text-blue-200 text-xs">ยินดีต้อนรับ</p>
               <h1 id="teacher-name" class="text-lg font-bold"></h1>
             </div>
           </div>
@@ -345,7 +345,7 @@
           <img id="header-logo" src="" class="h-10 bg-white p-1 rounded-xl hidden sm:block" onerror="this.src='https://i.postimg.cc/RZ0PCqVy/NKW-LOGO.png'">
           <div>
             <h2 id="header-system-name" class="text-xl font-extrabold"></h2>
-            <p id="header-school-name" class="text-orange-200 text-xs"></p>
+            <p id="header-school-name" class="text-blue-200 text-xs"></p>
           </div>
         </div>
       </div>
@@ -354,8 +354,8 @@
     <div class="app-card p-3">
       <div class="nav-tabs-container">
   <button class="nav-tab active" data-tab="attendance">📝 เช็คชื่อ</button>
-  <button class="nav-tab" onclick="openCleaningModal()">🧹 เช็คเขตพื้นที่</button>
-  <!-- ค้นหาปุ่มเดิม และเปลี่ยนเป็นแบบนี้ เพื่อให้เรียกฟังก์ชันเปิด Modal -->
+  <button class="nav-tab" data-tab="cleaning">🧹 เช็คเขตพื้นที่</button>
+  <button class="nav-tab" data-tab="cleaning-summary">📊 สถิติเขตพื้นที่</button>
 <button class="nav-tab" onclick="openSubjectAttendanceModal()">📚 เช็คเข้าเรียน</button>
     <!-- ✨ เพิ่มปุ่มสรุปรายวิชาตรงนี้ -->
   <button class="nav-tab" data-tab="subject-summary">📈 สรุปรายวิชา</button>
@@ -383,13 +383,130 @@
         <div id="classrooms-container" class="hidden">
           <div class="table-responsive shadow-sm">
             <table class="min-w-full bg-white border border-gray-100 rounded-2xl overflow-hidden">
-              <thead class="bg-orange-500 text-white"></thead>
+              <thead class="bg-blue-700 text-white"></thead>
               <tbody id="classrooms-list"></tbody>
             </table>
           </div>
         </div>
       </div>
     </div>
+
+    <!-- ===== Tab Cleaning ===== -->
+    <div id="cleaning" class="tab-content hidden">
+      <div class="app-card p-5 mb-5">
+        <div class="flex flex-col md:flex-row gap-4 items-end">
+          <div class="w-full md:w-1/3">
+            <label class="block text-gray-500 text-sm font-bold mb-1 ml-1">📅 เลือกวันที่</label>
+            <input type="text" id="cleaning-date" class="w-full">
+          </div>
+          <div class="w-full md:w-2/3">
+            <h2 id="cleaning-title" class="text-lg font-bold text-gray-800 text-right"></h2>
+          </div>
+        </div>
+      </div>
+      <div class="app-card p-5">
+        <div id="cleaning-table-container" class="hidden">
+          <div class="table-responsive shadow-sm">
+            <table class="min-w-full bg-white border border-gray-100 rounded-2xl overflow-hidden">
+              <thead class="bg-blue-700 text-white">
+                <tr>
+                  <th class="p-3 text-left">ห้องเรียน</th>
+                  <th class="p-3 text-center">นร.</th>
+                  <th class="p-3 text-center">สถานะรายสัปดาห์</th>
+                  <th class="p-3 text-center">การกระทำ</th>
+                </tr>
+              </thead>
+              <tbody id="cleaning-list"></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="cleaning-empty" class="text-center py-12 text-gray-400">กำลังโหลด...</div>
+      </div>
+    </div>
+
+    <!-- ===== Tab Cleaning Summary ===== -->
+    <div id="cleaning-summary" class="tab-content hidden">
+      <div class="app-card p-5 mb-5">
+        <div class="flex flex-col md:flex-row gap-4">
+          <div class="w-full md:w-1/3">
+            <label class="block text-gray-500 text-sm font-bold mb-1">📅 วันที่เริ่มต้น</label>
+            <input type="text" id="cleaning-summary-start" class="w-full">
+          </div>
+          <div class="w-full md:w-1/3">
+            <label class="block text-gray-500 text-sm font-bold mb-1">📅 วันที่สิ้นสุด</label>
+            <input type="text" id="cleaning-summary-end" class="w-full">
+          </div>
+          <div class="w-full md:w-1/3">
+            <label class="block text-gray-500 text-sm font-bold mb-1">🏫 ห้องเรียน</label>
+            <select id="cleaning-summary-room" class="w-full">
+              <option value="">ทุกห้อง</option>
+            </select>
+          </div>
+        </div>
+        <div class="mt-4 flex justify-end">
+          <button id="cleaning-summary-run" class="px-6 py-3 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-2xl font-bold shadow-lg shadow-blue-500/20 active:scale-95 transition">
+            🔍 ประมวลผล
+          </button>
+        </div>
+      </div>
+
+      <div id="cleaning-summary-empty" class="app-card p-5 text-center py-12 text-gray-400">
+        กรุณาเลือกช่วงวันที่และกดประมวลผล
+      </div>
+
+      <div id="cleaning-summary-content" class="hidden">
+        <div class="app-card p-5 mb-5">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+            <div class="bg-gradient-to-br from-emerald-500 to-teal-600 text-white p-5 rounded-2xl shadow">
+              <div class="text-sm opacity-90">⭐ คะแนนเฉลี่ย</div>
+              <div id="clean-stat-avg" class="text-3xl font-extrabold mt-2">-</div>
+            </div>
+            <div class="bg-gradient-to-br from-blue-600 to-indigo-700 text-white p-5 rounded-2xl shadow">
+              <div class="text-sm opacity-90">📊 จำนวนบันทึก</div>
+              <div id="clean-stat-total" class="text-3xl font-extrabold mt-2">-</div>
+            </div>
+            <div class="bg-gradient-to-br from-slate-700 to-slate-900 text-white p-5 rounded-2xl shadow">
+              <div class="text-sm opacity-90">🏆 ห้องคะแนนสูงสุด</div>
+              <div id="clean-stat-top-room" class="text-2xl font-extrabold mt-2">-</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="app-card p-5 mb-5">
+          <h3 class="text-lg font-bold text-gray-800 mb-3">🏆 Top 5 นักเรียนขยัน</h3>
+          <div class="table-responsive">
+            <table class="min-w-full">
+              <thead class="bg-blue-700 text-white">
+                <tr>
+                  <th class="p-3 text-left">อันดับ</th>
+                  <th class="p-3 text-left">ชื่อ-สกุล</th>
+                  <th class="p-3 text-center">ทำเวร (ครั้ง)</th>
+                </tr>
+              </thead>
+              <tbody id="clean-top-students"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="app-card p-5">
+          <h3 class="text-lg font-bold text-gray-800 mb-3">📅 รายละเอียดรายวัน</h3>
+          <div class="table-responsive">
+            <table class="min-w-full">
+              <thead class="bg-slate-800 text-white">
+                <tr>
+                  <th class="p-3 text-left">วันที่</th>
+                  <th class="p-3 text-left">ห้อง</th>
+                  <th class="p-3 text-left">ผู้ตรวจ</th>
+                  <th class="p-3 text-center">คะแนน</th>
+                </tr>
+              </thead>
+              <tbody id="clean-details-list"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 📈 Tab เนื้อหา: สรุปการเข้าเรียนรายวิชา -->
     <div id="subject-summary" class="tab-content hidden">
       <div class="app-card p-5 mb-5">
@@ -414,7 +531,7 @@
                 <th class="p-3 text-left">ชื่อ-สกุล</th>
                 <th class="p-3 text-center text-emerald-400">มา</th>
                 <th class="p-3 text-center text-rose-400">ขาด</th>
-                <th class="p-3 text-center text-amber-400">ลา</th>
+                <th class="p-3 text-center text-blue-200">ลา</th>
                 <th class="p-3 text-center text-blue-400">สาย</th>
                 <th class="p-3 text-center">รวม (ครั้ง)</th>
               </tr>
@@ -455,7 +572,7 @@
           <div class="table-responsive">
             <table class="min-w-full">
               <thead>
-                <tr class="bg-orange-500 text-white">
+                <tr class="bg-blue-700 text-white">
                   <th>รหัส</th>
                   <th>เลขที่</th>
                   <th>ชื่อ</th>
@@ -512,12 +629,12 @@
     <div class="modal-content">
       <div class="flex justify-between items-center p-4 border-b">
         <h2 id="modal-title" class="text-xl font-bold text-gray-800"></h2>
-        <button class="close text-3xl text-gray-400 hover:text-orange-500" onclick="document.getElementById('attendance-modal').style.display='none';">&times;</button>
+        <button class="close text-3xl text-gray-400 hover:text-blue-700" onclick="document.getElementById('attendance-modal').style.display='none';">&times;</button>
       </div>
       <div class="table-responsive p-4 flex-grow">
         <table class="min-w-full">
           <thead>
-            <tr class="bg-orange-500 text-white">
+            <tr class="bg-blue-700 text-white">
               <th>รหัส</th>
               <th>เลขที่</th>
               <th>ชื่อ</th>
