@@ -120,6 +120,96 @@ function getSpreadsheet(mode = DEFAULT_SPREADSHEET_MODE) {
   }
 }
 
+// Cache timetable rows for 5 minutes to avoid reading the spreadsheet on every request.
+function getCachedTimetableData() {
+  var cacheKey = 'TIMETABLE_V1';
+  var cache = null;
+
+  try {
+    cache = CacheService.getScriptCache();
+    var cached = cache.get(cacheKey);
+    if (cached) {
+      var cachedData = JSON.parse(cached);
+      if (Array.isArray(cachedData)) {
+        Logger.log('✅ [Cache HIT] Timetable from cache');
+        return cachedData;
+      }
+      cache.remove(cacheKey);
+    }
+  } catch (error) {
+    Logger.log('⚠️ Timetable cache read failed: ' + error.message);
+  }
+
+  Logger.log('🔄 [Cache MISS] Loading Timetable from sheet...');
+  var startedAt = Date.now();
+  var sheet = getSpreadsheet().getSheetByName('Timetable');
+  if (!sheet) {
+    Logger.log('⚠️ ไม่พบชีต Timetable');
+    return [];
+  }
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 1) return [];
+  var data = sheet.getRange(1, 1, lastRow, 9).getValues();
+  Logger.log('📊 Timetable rows loaded: ' + data.length + ' in ' + (Date.now() - startedAt) + 'ms');
+
+  if (cache) {
+    try {
+      var json = JSON.stringify(data);
+      var byteSize = Utilities.newBlob(json, 'application/json').getBytes().length;
+      if (byteSize < 90000) {
+        cache.put(cacheKey, json, 300);
+      } else {
+        Logger.log('⚠️ Timetable too large for cache (' + byteSize + ' bytes); skipping cache');
+      }
+    } catch (error) {
+      Logger.log('⚠️ Timetable cache write failed: ' + error.message);
+    }
+  }
+
+  return data;
+}
+
+// Run manually after editing the Timetable sheet to invalidate its cached copy.
+function clearTimetableCache() {
+  try {
+    CacheService.getScriptCache().remove('TIMETABLE_V1');
+    return { status: 'success', message: 'ล้าง cache แล้ว' };
+  } catch (error) {
+    Logger.log('❌ Error clearing Timetable cache: ' + error.message);
+    return { status: 'error', message: error.message || 'Unable to clear cache' };
+  }
+}
+
+function refreshTimetableCache() {
+  var result = clearTimetableCache();
+  Logger.log(result.status === 'success' ? '✅ Timetable cache cleared' : '❌ Timetable cache clear failed');
+  return result;
+}
+
+// Safe diagnostic for Apps Script Editor: reports row count and elapsed time only.
+function debugSubjectSchedule() {
+  var startedAt = Date.now();
+  try {
+    var data = getCachedTimetableData();
+    var result = {
+      status: 'success',
+      rows: Math.max(0, data.length - 1),
+      elapsedMs: Date.now() - startedAt
+    };
+    Logger.log('📅 debugSubjectSchedule: ' + JSON.stringify(result));
+    return result;
+  } catch (error) {
+    var failure = {
+      status: 'error',
+      message: error && error.message ? String(error.message) : 'Unknown server error',
+      elapsedMs: Date.now() - startedAt
+    };
+    Logger.log('❌ debugSubjectSchedule: ' + JSON.stringify(failure));
+    return failure;
+  }
+}
+
 function getStudentAnalysisUrl() {
   const sheet = getSpreadsheet().getSheetByName('Config');
   return sheet.getRange('B8').getValue(); // ดึงค่า URL จาก B8
@@ -1682,69 +1772,56 @@ function getSubjectAttendanceForEdit(date, subjectCode, subjectName, gradeLevel,
 }
 
 function getTeacherSubjectSchedule(teacherEmail, targetDate) {
+  var startedAt = Date.now();
   try {
-    Logger.log('📅 getTeacherSubjectSchedule: date="' + targetDate + '"');
-    var ss = getSpreadsheet();
-    if (!ss) throw new Error('ไม่สามารถเปิด Spreadsheet (ตรวจสอบ SPREADSHEET_ID)');
+    Logger.log('📅 getTeacherSubjectSchedule START: date="' + targetDate + '"');
 
-    var sheet = ss.getSheetByName("Timetable");
-    if (!sheet) {
-      Logger.log('⚠️ ไม่พบชีต Timetable');
-      return { status: "success", data: [], message: "ยังไม่มีชีต Timetable" };
+    var data = getCachedTimetableData();
+    Logger.log('⏱️ After cache: ' + (Date.now() - startedAt) + 'ms, rows: ' + data.length);
+    if (!data || data.length <= 1) {
+      return { status: 'success', data: [], message: 'ไม่มีข้อมูลในชีต Timetable' };
     }
 
-    var lastRow = sheet.getLastRow();
-    if (lastRow <= 1) {
-      return { status: "success", data: [], message: "ชีต Timetable ว่าง" };
-    }
-    var data = sheet.getRange(1, 1, lastRow, 9).getValues();
-    Logger.log('📊 Timetable rows (รวม header): ' + data.length);
-
-    // ✅ แปลงวันที่แบบ local (กัน timezone เพี้ยน)
+    // Parse the requested date in the script's local timezone.
     var dateObj;
     if (targetDate) {
-      var p = String(targetDate).split('-');
-      dateObj = new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]));
+      var parts = String(targetDate).split('-');
+      dateObj = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
     } else {
       dateObj = new Date();
     }
 
-    var days = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์"];
+    var days = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
     var dayName = days[dateObj.getDay()];
     var normEmail = String(teacherEmail || '').trim().toLowerCase();
-    Logger.log('🗓️ Day = ' + dayName + ', matching teacher schedule');
+    Logger.log('🗓️ Looking for: Day=' + dayName);
 
     var result = [];
-
     for (var i = 1; i < data.length; i++) {
       var row = data[i];
       if (!row || row.length < 9) continue;
 
       var rowDay = String(row[1] || '').trim();
-      var rowEmail = String(row[5] || '').trim();
-      var rowEmailNorm = rowEmail.toLowerCase();
-
+      var rowEmailNorm = String(row[5] || '').trim().toLowerCase();
       if (rowDay === dayName && rowEmailNorm === normEmail) {
         result.push({
           timetableId: String(row[0] || ''),
-          period:      row[2],
+          period: row[2],
           subjectCode: String(row[3] || ''),
           subjectName: String(row[4] || ''),
-          gradeLevel:  String(row[6] || ''),
-          room:        String(row[7] || ''),
+          gradeLevel: String(row[6] || ''),
+          room: String(row[7] || ''),
           classroomId: String(row[8] || '')
         });
       }
     }
 
-    Logger.log('✅ พบ ' + result.length + ' คาบ');
-
-    return { status: "success", data: result };
-
-  } catch (e) {
-    var message = e && e.message ? String(e.message) : 'Unknown server error';
-    Logger.log('❌ Error in getTeacherSubjectSchedule');
-    return { status: "error", message: message, data: [] };
+    Logger.log('✅ Found ' + result.length + ' periods in ' + (Date.now() - startedAt) + 'ms total');
+    return { status: 'success', data: result };
+  } catch (error) {
+    var message = error && error.message ? String(error.message) : 'Unknown server error';
+    Logger.log('❌ getTeacherSubjectSchedule failed after ' + (Date.now() - startedAt) + 'ms: ' + message);
+    return { status: 'error', message: message, data: [] };
   }
 }
 

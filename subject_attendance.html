@@ -101,6 +101,8 @@
     let currentScheduleList = [];
     let selectedSchedule = null;
     let currentDateStr = '';
+    let scheduleRequestId = 0;
+    let scheduleTimeoutId = null;
 
     $(document).ready(function() {
       const params = new URLSearchParams(window.location.search);
@@ -124,7 +126,14 @@
       loadTeacherSchedule(targetDate, preselectSubject);
     });
 
-    function loadTeacherSchedule(dateStr, preselectSubject) {
+    function loadTeacherSchedule(dateStr, preselectSubject, retryCount) {
+      retryCount = Number.isInteger(retryCount) && retryCount >= 0 ? retryCount : 0;
+      const requestId = ++scheduleRequestId;
+      if (scheduleTimeoutId !== null) {
+        clearTimeout(scheduleTimeoutId);
+        scheduleTimeoutId = null;
+      }
+
       let teacher = {};
       try {
         teacher = JSON.parse(localStorage.getItem('teacher') || '{}') || {};
@@ -137,7 +146,7 @@
         select.empty().append($('<option>', { value: '', text: message }));
       };
 
-      console.log('[loadTeacherSchedule] date =', dateStr);
+      console.log('[loadTeacherSchedule] date =', dateStr, 'retry =', retryCount);
 
       if (!teacherEmail) {
         Swal.fire('ผิดพลาด', 'ไม่พบข้อมูลครูผู้ใช้ระบบ', 'error');
@@ -145,7 +154,7 @@
       }
 
       Swal.fire({
-        title: 'กำลังโหลดตารางสอน...',
+        title: retryCount > 0 ? `กำลังลองใหม่ (ครั้งที่ ${retryCount + 1})...` : 'กำลังโหลดตารางสอน...',
         html: `<div style="color:#666;font-size:14px;margin-top:8px;">วันที่ ${formatDateThai(dateStr)}</div>`,
         allowOutsideClick: false,
         allowEscapeKey: false,
@@ -157,34 +166,29 @@
       selectedSchedule = null;
       currentScheduleList = [];
 
+      // Fire before the Apps Script execution limit so a hung request can be retried.
+      scheduleTimeoutId = setTimeout(function() {
+        if (requestId !== scheduleRequestId) return;
+        scheduleTimeoutId = null;
+        Swal.close();
+        handleScheduleTimeout(dateStr, preselectSubject, retryCount, 'รอการตอบกลับเกิน 25 วินาที', requestId, setSelectMessage);
+      }, 25000);
+
       google.script.run
         .withSuccessHandler(function(res) {
+          if (requestId !== scheduleRequestId) return;
+          if (scheduleTimeoutId !== null) {
+            clearTimeout(scheduleTimeoutId);
+            scheduleTimeoutId = null;
+          }
+
           const responseType = typeof res;
           const responseStatus = res && responseType === 'object' ? res.status : undefined;
           console.log('[getTeacherSubjectSchedule] response type/status:', responseType, responseStatus);
           Swal.close();
 
           if (res === null || res === undefined) {
-            setSelectMessage('-- Server ไม่ตอบสนอง (timeout) --');
-            Swal.fire({
-              icon: 'error',
-              title: 'ไม่ได้รับข้อมูลจาก Server',
-              html: `
-                <div class="text-sm text-left">
-                  <p>Server ไม่ส่งข้อมูลกลับมา อาจเกิดจาก:</p>
-                  <ul class="list-disc pl-5 mt-2 text-xs">
-                    <li>Timeout (ข้อมูล Timetable ใหญ่มาก)</li>
-                    <li>Apps Script Error (ดูที่ Execution log)</li>
-                  </ul>
-                  <p class="mt-2"><b>แนะนำ:</b> กดลองใหม่ หรือตรวจสอบ Execution log</p>
-                </div>
-              `,
-              confirmButtonText: 'ลองใหม่',
-              showCancelButton: true,
-              cancelButtonText: 'ปิด'
-            }).then(function(result) {
-              if (result.isConfirmed) loadTeacherSchedule(dateStr, preselectSubject);
-            });
+            handleScheduleTimeout(dateStr, preselectSubject, retryCount, 'Server ไม่ส่งข้อมูลกลับมา', requestId, setSelectMessage);
             return;
           }
 
@@ -259,17 +263,50 @@
           }
         })
         .withFailureHandler(function(err) {
+          if (requestId !== scheduleRequestId) return;
+          if (scheduleTimeoutId !== null) {
+            clearTimeout(scheduleTimeoutId);
+            scheduleTimeoutId = null;
+          }
           console.error('[getTeacherSubjectSchedule] Request failed.');
-          Swal.close();
           const msg = (err && typeof err.message === 'string') ? err.message : 'Unknown error';
-          setSelectMessage('-- โหลดไม่สำเร็จ: ' + msg + ' --');
-          Swal.fire({
-            icon: 'error',
-            title: 'ผิดพลาด',
-            text: 'ไม่สามารถโหลดตารางสอนได้: ' + msg
-          });
+          Swal.close();
+          handleScheduleTimeout(dateStr, preselectSubject, retryCount, msg, requestId, setSelectMessage);
         })
         .getTeacherSubjectSchedule(teacherEmail, dateStr);
+    }
+
+    function handleScheduleTimeout(dateStr, preselectSubject, retryCount, errMsg, requestId, setSelectMessage) {
+      if (requestId !== scheduleRequestId) return;
+      setSelectMessage('-- Server ไม่ตอบสนอง --');
+
+      if (retryCount < 1) {
+        Swal.fire({
+          icon: 'warning',
+          title: 'Server ตอบสนองช้า',
+          text: errMsg || 'Apps Script กำลังเริ่มทำงานใหม่ ลองอีกครั้งอัตโนมัติ',
+          timer: 2000,
+          showConfirmButton: false
+        }).then(function() {
+          if (requestId === scheduleRequestId) {
+            loadTeacherSchedule(dateStr, preselectSubject, retryCount + 1);
+          }
+        });
+        return;
+      }
+
+      Swal.fire({
+        icon: 'error',
+        title: 'ไม่สามารถโหลดได้',
+        text: errMsg ? 'ลองแล้ว 2 ครั้ง: ' + errMsg : 'ลองแล้ว 2 ครั้ง กรุณารอแล้วกดลองใหม่',
+        confirmButtonText: 'ลองอีกครั้ง',
+        showCancelButton: true,
+        cancelButtonText: 'ปิด'
+      }).then(function(result) {
+        if (requestId === scheduleRequestId && result.isConfirmed) {
+          loadTeacherSchedule(dateStr, preselectSubject, 0);
+        }
+      });
     }
 
     function formatDateThai(dateStr) {
