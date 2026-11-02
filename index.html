@@ -863,9 +863,11 @@
         <button id="risk-prev" type="button" class="px-3 py-2 bg-gray-100 rounded-xl font-bold" aria-label="ช่วงก่อนหน้า">◀</button>
         <button id="risk-next" type="button" class="px-3 py-2 bg-gray-100 rounded-xl font-bold" aria-label="ช่วงถัดไป">▶</button>
         <button id="risk-run" type="button" class="px-6 py-2 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-xl font-bold shadow-lg">🔍 ประเมิน</button>
+        <button id="risk-print-summary" type="button" class="px-4 py-2 bg-slate-700 text-white rounded-xl font-bold active:scale-95">🖨️ พิมพ์รายงาน</button>
       </div>
     </div>
     <div class="mt-2 text-xs text-gray-400">⚙️ น้ำหนักปัจจุบัน: <span id="risk-weights-display">เข้าแถว 40% | เขตพื้นที่ 30% | เข้าเรียน 30%</span></div>
+    <div class="mt-2 text-xs text-gray-500">เกณฑ์กลุ่มรายช่วง: 🔴 คะแนนรวม &lt;60% หรือขาดเรียนติดต่อกัน ≥3 วัน; 🟡 (เมื่อไม่เข้าเกณฑ์แดง) ไม่มีข้อมูล, คะแนนรวม 60–84% หรือ streak 2 วัน; 🟢 คะแนนรวม ≥85% และ streak ไม่เกิน 1 วัน</div>
   </div>
 
   <div id="risk-empty" class="app-card p-5 text-center py-12 text-gray-400">เลือกช่วงวันที่แล้วกดประเมิน</div>
@@ -903,15 +905,67 @@
 
     <div id="risk-list-red-container" class="app-card p-5 mb-5">
       <h3 class="text-lg font-bold text-rose-700 mb-3">🔴 กลุ่มใกล้ชิด (ต้องติดตามทันที)</h3>
-      <div class="table-responsive"><table class="min-w-full"><thead><tr class="bg-rose-700 text-white"><th class="p-3 text-center">ห้อง</th><th class="p-3 text-left">ชื่อ-สกุล</th><th class="p-3 text-center">เข้าแถว</th><th class="p-3 text-center">เขตพื้นที่</th><th class="p-3 text-center">เข้าเรียน</th><th class="p-3 text-center">Composite</th><th class="p-3 text-center">Streak</th><th class="p-3 text-center">ดู</th></tr></thead><tbody id="risk-list-red"></tbody></table></div>
+      <div class="table-responsive"><table class="min-w-full"><thead><tr class="bg-rose-700 text-white"><th class="p-3 text-center">ห้อง</th><th class="p-3 text-left">ชื่อ-สกุล</th><th class="p-3 text-center">เข้าแถว</th><th class="p-3 text-center">เขตพื้นที่</th><th class="p-3 text-center">เข้าเรียน</th><th class="p-3 text-center">Composite</th><th class="p-3 text-center">Streak</th><th class="p-3 text-center">ดำเนินการ</th></tr></thead><tbody id="risk-list-red"></tbody></table></div>
     </div>
     <div id="risk-list-yellow-container" class="app-card p-5 mb-5">
       <h3 class="text-lg font-bold text-amber-700 mb-3">🟡 กลุ่มห่วงใย / ไม่มีข้อมูล</h3>
-      <div class="table-responsive"><table class="min-w-full"><thead><tr class="bg-amber-700 text-white"><th class="p-3 text-center">ห้อง</th><th class="p-3 text-left">ชื่อ-สกุล</th><th class="p-3 text-center">เข้าแถว</th><th class="p-3 text-center">เขตพื้นที่</th><th class="p-3 text-center">เข้าเรียน</th><th class="p-3 text-center">Composite</th><th class="p-3 text-center">Streak</th><th class="p-3 text-center">ดู</th></tr></thead><tbody id="risk-list-yellow"></tbody></table></div>
+      <div class="table-responsive"><table class="min-w-full"><thead><tr class="bg-amber-700 text-white"><th class="p-3 text-center">ห้อง</th><th class="p-3 text-left">ชื่อ-สกุล</th><th class="p-3 text-center">เข้าแถว</th><th class="p-3 text-center">เขตพื้นที่</th><th class="p-3 text-center">เข้าเรียน</th><th class="p-3 text-center">Composite</th><th class="p-3 text-center">Streak</th><th class="p-3 text-center">ดำเนินการ</th></tr></thead><tbody id="risk-list-yellow"></tbody></table></div>
     </div>
     <div id="risk-list-green-container" class="app-card p-5">
       <h3 class="text-lg font-bold text-emerald-700 mb-3">🟢 กลุ่มไว้ใจ (ทำได้ดี)</h3>
-      <div class="table-responsive"><table class="min-w-full"><thead><tr class="bg-emerald-700 text-white"><th class="p-3 text-center">ห้อง</th><th class="p-3 text-left">ชื่อ-สกุล</th><th class="p-3 text-center">เข้าแถว</th><th class="p-3 text-center">เขตพื้นที่</th><th class="p-3 text-center">เข้าเรียน</th><th class="p-3 text-center">Composite</th><th class="p-3 text-center">Streak</th><th class="p-3 text-center">ดู</th></tr></thead><tbody id="risk-list-green"></tbody></table></div>
+      <div class="table-responsive"><table class="min-w-full"><thead><tr class="bg-emerald-700 text-white"><th class="p-3 text-center">ห้อง</th><th class="p-3 text-left">ชื่อ-สกุล</th><th class="p-3 text-center">เข้าแถว</th><th class="p-3 text-center">เขตพื้นที่</th><th class="p-3 text-center">เข้าเรียน</th><th class="p-3 text-center">Composite</th><th class="p-3 text-center">Streak</th><th class="p-3 text-center">ดำเนินการ</th></tr></thead><tbody id="risk-list-green"></tbody></table></div>
+    </div>
+  </div>
+</div>
+
+<!-- Print Config Modal: prepares documents for printing only; it does not contact guardians. -->
+<div id="print-config-modal" class="fixed inset-0 z-[60] items-center justify-center bg-black/50 backdrop-blur-sm p-4" style="display:none;">
+  <div class="app-card w-full max-w-lg bg-white rounded-3xl overflow-hidden">
+    <div class="flex justify-between items-center p-5 bg-gradient-to-r from-slate-800 to-slate-900 text-white">
+      <h2 id="print-config-title" class="text-lg font-bold">🖨️ ตั้งค่าการพิมพ์</h2>
+      <button type="button" onclick="$('#print-config-modal').hide()" class="text-white text-2xl hover:opacity-75" aria-label="ปิด">×</button>
+    </div>
+    <div class="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
+      <div>
+        <label for="print-doc-type" class="block text-sm font-bold mb-1">📋 ประเภทเอกสาร</label>
+        <select id="print-doc-type" class="w-full">
+          <option value="warning">📄 หนังสือแจ้งเตือนผู้ปกครอง</option>
+          <option value="activity">📋 หนังสือทำกิจกรรมเพื่อปรับปรุงพฤติกรรม</option>
+        </select>
+        <p id="print-history-summary" class="mt-1 text-xs text-gray-500" aria-live="polite"></p>
+      </div>
+      <div>
+        <label for="print-school" class="block text-sm font-bold mb-1">🏫 โรงเรียน</label>
+        <input type="text" id="print-school" class="w-full" placeholder="เช่น โรงเรียนน้ำคำวิทยา">
+      </div>
+      <div>
+        <label for="print-doc-no" class="block text-sm font-bold mb-1">📮 ที่</label>
+        <input type="text" id="print-doc-no" class="w-full" placeholder="เช่น ศธ 04201/1234">
+      </div>
+      <div>
+        <label for="print-doc-date" class="block text-sm font-bold mb-1">📅 วันที่ออกหนังสือ</label>
+        <input type="text" id="print-doc-date" class="w-full">
+      </div>
+      <div>
+        <label for="print-director" class="block text-sm font-bold mb-1">👨‍💼 ผู้อำนวยการ</label>
+        <input type="text" id="print-director" class="w-full" placeholder="ชื่อ-สกุล ผู้อำนวยการ">
+      </div>
+
+      <div id="print-activity-options" class="space-y-2 p-3 bg-blue-50 rounded-2xl hidden">
+        <p class="text-sm font-bold text-blue-800 mb-2">📋 กิจกรรมที่มอบหมาย (เลือกได้หลายข้อ)</p>
+        <label class="flex items-center gap-2 text-sm"><input type="checkbox" class="print-act-check" value="เข้าร่วมกิจกรรมบำเพ็ญประโยชน์ จำนวน ___ ชั่วโมง" checked><span>บำเพ็ญประโยชน์</span></label>
+        <label class="flex items-center gap-2 text-sm"><input type="checkbox" class="print-act-check" value="ทำความสะอาดเขตพื้นที่ จำนวน ___ ครั้ง" checked><span>ทำความสะอาดเขตพื้นที่</span></label>
+        <label class="flex items-center gap-2 text-sm"><input type="checkbox" class="print-act-check" value="ส่งงานที่ค้าง จำนวน ___ ชิ้น"><span>ส่งงานที่ค้าง</span></label>
+        <label class="flex items-center gap-2 text-sm"><input type="checkbox" class="print-act-check" value="เข้าร่วมกิจกรรมแนะแนว / รับคำปรึกษา จำนวน ___ ครั้ง" checked><span>รับคำปรึกษา / แนะแนว</span></label>
+        <div class="grid grid-cols-2 gap-2 mt-2">
+          <div><label for="print-act-start" class="block text-xs font-bold">เริ่ม</label><input type="text" id="print-act-start" class="w-full text-sm"></div>
+          <div><label for="print-act-end" class="block text-xs font-bold">ถึง</label><input type="text" id="print-act-end" class="w-full text-sm"></div>
+        </div>
+      </div>
+    </div>
+    <div class="p-5 flex gap-3">
+      <button type="button" onclick="$('#print-config-modal').hide()" class="flex-1 py-3 bg-gray-100 rounded-2xl font-bold">ยกเลิก</button>
+      <button id="print-config-confirm" type="button" class="flex-1 py-3 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-2xl font-bold">🖨️ พิมพ์</button>
     </div>
   </div>
 </div>

@@ -1796,6 +1796,7 @@ async function initRiskAssessment() {
   $('#risk-prev').off('click.risk').on('click.risk', function() { shiftRiskPeriod(-1); });
   $('#risk-next').off('click.risk').on('click.risk', function() { shiftRiskPeriod(1); });
   $('#risk-run').off('click.risk').on('click.risk', loadRiskAssessment);
+  $('#risk-print-summary').off('click.risk').on('click.risk', printRiskSummary);
   $('#risk-classroom').off('change.risk').on('change.risk', function() {
     riskState.classroomFilter = String($(this).val() || '');
     loadRiskAssessment();
@@ -2101,10 +2102,22 @@ function renderRiskList(category, students) {
       const color = item.score >= 85 ? 'text-emerald-600' : item.score >= 60 ? 'text-amber-600' : 'text-rose-600';
       return `<span class="font-bold ${color}">${item.score}%</span>`;
     };
-    tbody.append(`<tr class="border-b border-gray-100 hover:bg-blue-50"><td class="p-3 text-center text-gray-600 text-sm">${riskEscapeHtml(student.classroom_name)}</td><td class="p-3 text-gray-800 font-medium">${riskEscapeHtml(student.name)}</td><td class="p-3 text-center">${pct(student.breakdown.attendance)}</td><td class="p-3 text-center">${pct(student.breakdown.cleaning)}</td><td class="p-3 text-center">${pct(student.breakdown.subject)}</td><td class="p-3 text-center font-bold text-lg">${student.composite === null ? '—' : `${student.composite}%`}</td><td class="p-3 text-center">${student.streak > 0 ? `${student.streak} วัน` : '—'}</td><td class="p-3 text-center"><button type="button" class="risk-student-detail px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-bold" data-student-id="${riskEscapeHtml(student.id)}" data-classroom-id="${riskEscapeHtml(student.classroom_id)}">👁️</button></td></tr>`);
+    const studentId = riskEscapeHtml(student.id);
+    const classroomId = riskEscapeHtml(student.classroom_id);
+    const printButtons = category === 'red' ? `
+      <button type="button" class="risk-print-warning px-2 py-1 bg-rose-100 text-rose-700 rounded-lg text-xs font-bold hover:bg-rose-200 mr-1" data-student-id="${studentId}" data-classroom-id="${classroomId}" title="พิมพ์หนังสือแจ้งเตือน">📄</button>
+      <button type="button" class="risk-print-activity px-2 py-1 bg-orange-100 text-orange-700 rounded-lg text-xs font-bold hover:bg-orange-200 mr-1" data-student-id="${studentId}" data-classroom-id="${classroomId}" title="พิมพ์หนังสือทำกิจกรรม">📋</button>
+    ` : '';
+    tbody.append(`<tr class="border-b border-gray-100 hover:bg-blue-50"><td class="p-3 text-center text-gray-600 text-sm">${riskEscapeHtml(student.classroom_name)}</td><td class="p-3 text-gray-800 font-medium">${riskEscapeHtml(student.name)}</td><td class="p-3 text-center">${pct(student.breakdown.attendance)}</td><td class="p-3 text-center">${pct(student.breakdown.cleaning)}</td><td class="p-3 text-center">${pct(student.breakdown.subject)}</td><td class="p-3 text-center font-bold text-lg">${student.composite === null ? '—' : `${student.composite}%`}</td><td class="p-3 text-center">${student.streak > 0 ? `${student.streak} วัน` : '—'}</td><td class="p-3 text-center whitespace-nowrap">${printButtons}<button type="button" class="risk-student-detail px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-bold" data-student-id="${studentId}" data-classroom-id="${classroomId}" title="ดูรายละเอียด">👁️</button></td></tr>`);
   });
   tbody.off('click.risk', '.risk-student-detail').on('click.risk', '.risk-student-detail', function() {
     showRiskDetail($(this).attr('data-student-id'), $(this).attr('data-classroom-id'));
+  });
+  tbody.off('click.risk', '.risk-print-warning').on('click.risk', '.risk-print-warning', function() {
+    openPrintWarning($(this).attr('data-student-id'), $(this).attr('data-classroom-id'));
+  });
+  tbody.off('click.risk', '.risk-print-activity').on('click.risk', '.risk-print-activity', function() {
+    openPrintActivity($(this).attr('data-student-id'), $(this).attr('data-classroom-id'));
   });
 }
 
@@ -2188,5 +2201,392 @@ async function showRiskDaily(studentId, classroomId, date) {
     $('#risk-daily-sub').text('');
     $('#risk-daily-breakdown').html(`<div class="text-center text-rose-600">${riskEscapeHtml(error.message)}</div>`);
   }
+}
+
+// ========================================
+// PHASE 3.6: Print Documents (print-only)
+// ========================================
+
+let currentPrintTarget = null;
+
+function openPrintWarning(studentId, classroomId) {
+  showPrintConfig('warning', studentId, classroomId);
+}
+
+function openPrintActivity(studentId, classroomId) {
+  showPrintConfig('activity', studentId, classroomId);
+}
+
+async function showPrintConfig(type, studentId, classroomId) {
+  const students = riskState.lastData && Array.isArray(riskState.lastData.students) ? riskState.lastData.students : [];
+  const student = students.find(function(item) {
+    return String(item.id) === String(studentId) && (!classroomId || String(item.classroom_id) === String(classroomId));
+  });
+  if (!student) {
+    Swal.fire('แจ้งเตือน', 'ไม่พบนักเรียนในผลการประเมินปัจจุบัน', 'warning');
+    return;
+  }
+
+  let selectedType = type;
+  let history = { redCount: null, yellowCount: null, recommendation: 'none' };
+  let historyMessage = 'ยังไม่ได้โหลดประวัติกลุ่มสี';
+  $.LoadingOverlay('show', { text: 'กำลังโหลดประวัติ 8 สัปดาห์...' });
+  try {
+    const response = await runGoogleScript('getStudentRiskHistory', student.id, 8, student.classroom_id || classroomId || '');
+    if (response.status === 'success' && response.data) {
+      history = response.data;
+      if (history.recommendation === 'warning' || history.recommendation === 'activity') selectedType = history.recommendation;
+      const recommendationLabel = history.recommendation === 'activity'
+        ? 'แนะนำหนังสือทำกิจกรรม' : history.recommendation === 'warning'
+          ? 'แนะนำหนังสือแจ้งเตือน' : 'ยังไม่มีข้อแนะนำจากประวัติสีแดง';
+      historyMessage = `กลุ่มแดง ${history.redCount} ครั้งใน 8 สัปดาห์ — ${recommendationLabel}`;
+    } else {
+      historyMessage = 'โหลดประวัติไม่สำเร็จ — เลือกประเภทเอกสารได้เอง';
+    }
+  } catch (error) {
+    historyMessage = 'โหลดประวัติไม่สำเร็จ — เลือกประเภทเอกสารได้เอง';
+    console.warn('Could not load student risk history:', error);
+  } finally {
+    $.LoadingOverlay('hide');
+  }
+  currentPrintTarget = {
+    type: selectedType,
+    studentId: String(student.id),
+    classroomId: String(student.classroom_id || classroomId || ''),
+    history: history
+  };
+  $('#print-history-summary').text(historyMessage);
+
+  const schoolName = typeof CONFIG !== 'undefined' && CONFIG.school_config && CONFIG.school_config.schoolName
+    ? CONFIG.school_config.schoolName : 'โรงเรียน';
+  $('#print-school').val(schoolName);
+  $('#print-doc-type').val(selectedType);
+  $('#print-doc-no').val(`ศธ 04201/${new Date().getFullYear() + 543 + Math.floor(Math.random() * 1000)}`);
+  $('#print-director').val('');
+
+  const docDate = document.getElementById('print-doc-date');
+  const activityStart = document.getElementById('print-act-start');
+  const activityEnd = document.getElementById('print-act-end');
+  if (!docDate._flatpickr) flatpickr(docDate, { dateFormat: 'Y-m-d', locale: 'th', defaultDate: new Date() });
+  if (!activityStart._flatpickr) flatpickr(activityStart, { dateFormat: 'Y-m-d', locale: 'th', defaultDate: new Date() });
+  if (!activityEnd._flatpickr) flatpickr(activityEnd, { dateFormat: 'Y-m-d', locale: 'th', defaultDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000) });
+  docDate._flatpickr.setDate(new Date());
+  activityStart._flatpickr.setDate(new Date());
+  activityEnd._flatpickr.setDate(new Date(Date.now() + 14 * 24 * 60 * 60 * 1000));
+
+  $('#print-activity-options').toggleClass('hidden', selectedType !== 'activity');
+  $('#print-doc-type').off('change.print').on('change.print', function() {
+    $('#print-activity-options').toggleClass('hidden', $(this).val() !== 'activity');
+  });
+  $('#print-config-modal').css('display', 'flex');
+  $('#print-config-confirm').off('click.print').on('click.print', async function() {
+    const docType = $('#print-doc-type').val();
+    $('#print-config-modal').hide();
+    if (docType === 'warning') await printWarningLetter(student);
+    else await printBehaviorActivity(student);
+  });
+}
+
+async function printRiskSummary() {
+  if (!riskState.lastData) {
+    Swal.fire('แจ้งเตือน', 'กรุณาประเมินก่อน', 'warning');
+    return;
+  }
+  const data = riskState.lastData;
+  const schoolName = typeof CONFIG !== 'undefined' && CONFIG.school_config && CONFIG.school_config.schoolName
+    ? CONFIG.school_config.schoolName : 'โรงเรียน';
+  const period = data.period || {};
+  const rangeText = riskState.mode === 'week'
+    ? `สัปดาห์ ${formatThaiDate(period.startDate)} - ${formatThaiDate(period.endDate)}`
+    : `เดือน ${formatThaiDate(period.startDate)} - ${formatThaiDate(period.endDate)}`;
+  const win = window.open('', '_blank');
+  if (!win) {
+    Swal.fire('แจ้งเตือน', 'กรุณาอนุญาต Pop-up เพื่อพิมพ์รายงาน', 'warning');
+    return;
+  }
+  win.document.open();
+  win.document.write(buildSummaryReportHtml(data, schoolName, rangeText));
+  win.document.close();
+  await logGeneratedRiskDocument('summary', '', '');
+}
+
+async function logGeneratedRiskDocument(documentType, studentId, documentNo) {
+  const period = riskState.lastData && riskState.lastData.period ? riskState.lastData.period : {};
+  let actorName = '';
+  try {
+    const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
+    actorName = teacher.name || '';
+  } catch (error) {
+    console.warn('Could not read current app user name for document log:', error);
+  }
+  try {
+    const response = await runGoogleScript(
+      'logRiskDocumentGeneration', documentType, studentId || '',
+      period.startDate || '', period.endDate || '', documentNo || '', actorName
+    );
+    if (response.status !== 'success') throw new Error(response.message || 'บันทึกไม่สำเร็จ');
+  } catch (error) {
+    console.error('Document created, but its log entry could not be saved:', error);
+    Swal.fire('แจ้งเตือน', `สร้างเอกสารแล้ว แต่บันทึกประวัติการสร้างเอกสารไม่สำเร็จ: ${error.message || 'เกิดข้อผิดพลาด'}`, 'warning');
+  }
+}
+
+function buildSummaryReportHtml(data, schoolName, rangeText) {
+  const escape = riskEscapeHtml;
+  const summary = data.summary || {};
+  const students = Array.isArray(data.students) ? data.students : [];
+  const rows = students.map(function(student, index) {
+    const breakdown = student.breakdown || {};
+    const scoreText = function(item) { return item && item.score != null ? `${escape(item.score)}%` : '—'; };
+    const category = ['red', 'yellow', 'green'].includes(student.category) ? student.category : 'yellow';
+    const categoryLabel = category === 'red' ? '🔴 ใกล้ชิด' : category === 'yellow' ? '🟡 ห่วงใย' : '🟢 ไว้ใจ';
+    const categoryColor = category === 'red' ? '#fee2e2' : category === 'yellow' ? '#fef3c7' : '#dcfce7';
+    return `<tr><td style="text-align:center">${index + 1}</td><td>${escape(student.classroom_name)}</td><td>${escape(student.id)}</td><td>${escape(student.name)}</td><td style="text-align:center">${scoreText(breakdown.attendance)}</td><td style="text-align:center">${scoreText(breakdown.cleaning)}</td><td style="text-align:center">${scoreText(breakdown.subject)}</td><td style="text-align:center;font-weight:bold">${student.composite == null ? '—' : `${escape(student.composite)}%`}</td><td style="text-align:center">${Number(student.streak) > 0 ? `${escape(student.streak)} วัน` : '—'}</td><td style="text-align:center;font-weight:bold;background:${categoryColor}">${categoryLabel}</td></tr>`;
+  }).join('');
+
+  return `<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8"><title>รายงานสรุปกลุ่มความเสี่ยง</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  @page { size: A4 portrait; margin: 1.5cm; }
+  body { font-family: 'TH Sarabun New','TH SarabunPSK','Sarabun',sans-serif; font-size: 14pt; margin: 0; color: #111; }
+  .header { text-align: center; margin-bottom: 20px; }
+  .header h1 { font-size: 18pt; margin: 0 0 5px; }
+  .header p { margin: 0; font-size: 13pt; }
+  table { width: 100%; border-collapse: collapse; font-size: 11pt; }
+  th, td { border: 1px solid #000; padding: 4px 6px; }
+  th { background: #1e3a8a; color: #fff; font-weight: bold; }
+  .summary { display: flex; gap: 8px; justify-content: space-around; margin: 15px 0; font-size: 12pt; }
+  .summary > div { padding: 6px 10px; border-radius: 6px; font-weight: bold; }
+  .toolbar { position: fixed; top: 10px; right: 10px; background: #fff; padding: 8px; border-radius: 8px; box-shadow: 0 2px 10px #0002; }
+  .toolbar button { padding: 6px 14px; border: 1px solid #ccc; border-radius: 6px; cursor: pointer; font-weight: bold; }
+  @media print { .toolbar { display: none; } }
+</style></head><body>
+<div class="toolbar"><button onclick="window.print()">🖨️ พิมพ์</button></div>
+<div class="header"><h1>รายงานสรุปกลุ่มความเสี่ยงนักเรียน</h1><p>${escape(schoolName)}</p><p>ช่วงเวลา: ${escape(rangeText)}</p></div>
+<div class="summary">
+  <div style="background:#f0fdf4;color:#166534">🟢 ไว้ใจ: ${escape(summary.green || 0)} คน</div>
+  <div style="background:#fefce8;color:#92400e">🟡 ห่วงใย: ${escape(summary.yellow || 0)} คน</div>
+  <div style="background:#fef2f2;color:#991b1b">🔴 ใกล้ชิด: ${escape(summary.red || 0)} คน</div>
+  <div style="background:#eff6ff;color:#1e40af">⭐ เฉลี่ย: ${escape(summary.avgScore || 0)}%</div>
+</div>
+<table><thead><tr><th>#</th><th>ห้อง</th><th>รหัส</th><th>ชื่อ-สกุล</th><th>เข้าแถว</th><th>เขตพื้นที่</th><th>เข้าเรียน</th><th>รวม</th><th>Streak</th><th>กลุ่ม</th></tr></thead><tbody>${rows}</tbody></table>
+<div style="margin-top:30px;text-align:right;font-size:12pt"><div>ลงชื่อ ........................................................ ครูผู้รายงาน</div><div style="margin-top:6px">( ........................................................ )</div></div>
+</body></html>`;
+}
+
+async function printWarningLetter(student) {
+  // Open the print window synchronously from the click gesture to avoid popup blockers.
+  const win = window.open('', '_blank');
+  if (!win) {
+    Swal.fire('แจ้งเตือน', 'กรุณาอนุญาต Pop-up เพื่อพิมพ์หนังสือ', 'warning');
+    return;
+  }
+  $.LoadingOverlay('show', { text: 'กำลังเตรียมเอกสาร...' });
+  try {
+    const history = currentPrintTarget && currentPrintTarget.history ? currentPrintTarget.history : { redCount: null, weeks: [] };
+    const docNo = $('#print-doc-no').val() || '............';
+    const school = $('#print-school').val() || 'โรงเรียน';
+    const director = $('#print-director').val() || '....................................';
+    const docDate = $('#print-doc-date').val() || new Date().toISOString().split('T')[0];
+    const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
+    const teacherName = teacher.name || '....................................';
+    const period = riskState.lastData.period;
+    const rangeText = `ตั้งแต่วันที่ ${formatThaiDate(period.startDate)} ถึง ${formatThaiDate(period.endDate)}`;
+    const breakdown = student.breakdown || {};
+    const detailLines = [];
+    if (breakdown.attendance) detailLines.push(`การเข้าแถว: ${breakdown.attendance.score}% (${breakdown.attendance.points}/${breakdown.attendance.total} ครั้ง)`);
+    if (breakdown.cleaning) detailLines.push(`การทำเวรเขตพื้นที่: ${breakdown.cleaning.score}% (${breakdown.cleaning.points}/${breakdown.cleaning.total} ครั้ง)`);
+    if (breakdown.subject) detailLines.push(`การเข้าเรียน: ${breakdown.subject.score}% (${breakdown.subject.points}/${breakdown.subject.total} ครั้ง)`);
+    const html = buildWarningLetterHtml({
+      school: school, docNo: docNo, docDate: docDate, director: director, teacherName: teacherName,
+      student: student, rangeText: rangeText, detailLines: detailLines,
+      redCount: history.redCount, composite: student.composite, streak: student.streak
+    });
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+    await logGeneratedRiskDocument('warning', student.id, $('#print-doc-no').val());
+  } catch (error) {
+    if (!win.closed) win.close();
+    Swal.fire('ผิดพลาด', error.message || 'เตรียมหนังสือไม่สำเร็จ', 'error');
+  } finally {
+    $.LoadingOverlay('hide');
+  }
+}
+
+function buildWarningLetterHtml(options) {
+  const escape = riskEscapeHtml;
+  const school = escape(options.school);
+  const student = options.student || {};
+  const studentName = escape(student.name);
+  const classroomName = escape(student.classroom_name);
+  const studentId = escape(student.id);
+  const composite = options.composite == null ? '—' : escape(options.composite);
+  const streak = Number(options.streak) || 0;
+  const reasonText = [];
+  if (options.composite != null && Number(options.composite) < 60) reasonText.push('คะแนนรวมต่ำกว่า 60%');
+  if (streak >= 3) reasonText.push(`ขาดเรียนติดต่อกัน ${escape(streak)} วัน`);
+  const reason = reasonText.length ? reasonText.join(' หรือ ') : 'เข้าเกณฑ์ติดตามกลุ่มใกล้ชิดของโรงเรียน';
+  const details = (options.detailLines || []).map(function(line) {
+    return `<div style="padding-left:2.5cm;text-indent:-0.5cm">• ${escape(line)}</div>`;
+  }).join('');
+  const docNo = escape(options.docNo);
+  const docDateThai = formatThaiDateLong(options.docDate);
+  const director = escape(options.director);
+  const teacherName = escape(options.teacherName);
+  const rangeText = escape(options.rangeText);
+
+  return `<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8"><title>หนังสือแจ้งเตือนผู้ปกครอง</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  @page { size: A4; margin: 2cm 2cm 2cm 2.5cm; }
+  body { font-family:'TH Sarabun New','TH SarabunPSK','Sarabun',sans-serif; font-size:16pt; line-height:1.4; margin:0; color:#000; }
+  .toolbar { position:fixed; top:10px; right:10px; background:#fff; padding:8px; border-radius:8px; box-shadow:0 2px 10px #0002; z-index:999; }
+  .toolbar button { padding:6px 14px; border:1px solid #ccc; border-radius:6px; cursor:pointer; font-weight:bold; }
+  @media print { .toolbar { display:none; } }
+  .garuda { text-align:center; font-size:40pt; line-height:1; margin-bottom:4px; }
+  .header { text-align:center; font-size:18pt; font-weight:bold; margin-bottom:4px; }
+  .header-sub { text-align:center; font-size:16pt; margin-bottom:24px; }
+  .meta { display:flex; justify-content:space-between; margin-bottom:16px; }
+  .indent { text-indent:2.5cm; text-align:justify; margin:8px 0; }
+  .signature { text-align:right; margin-top:30px; }
+  .cut-line { border-top:1px dashed #999; margin:30px 0 20px; }
+  .ack-title { text-align:center; font-weight:bold; font-size:18pt; margin-bottom:16px; }
+  .ack-body { font-size:15pt; line-height:1.6; }
+  @media print { .ack-title { page-break-before:always; } }
+</style></head><body>
+<div class="toolbar"><button onclick="window.print()">🖨️ พิมพ์ / บันทึก PDF</button></div>
+<div class="garuda">🦁</div><div class="header">${school}</div><div class="header-sub">${school}</div>
+<div class="meta"><div>ที่ ${docNo}</div><div>${docDateThai}</div></div>
+<div style="margin:16px 0"><strong>เรื่อง</strong> ขอความร่วมมือดูแลการเข้าเรียนและการร่วมกิจกรรมของนักเรียน</div>
+<div style="margin-bottom:8px"><strong>เรียน</strong> ผู้ปกครองของ ${studentName}</div>
+<div class="indent">ด้วย ${school} ได้ติดตามการเข้าเรียน การร่วมกิจกรรมหน้าเสาธง และการทำกิจกรรมเขตพื้นที่ของนักเรียนอย่างต่อเนื่อง พบว่า <strong>${studentName}</strong> นักเรียนชั้น ${classroomName} เลขประจำตัว ${studentId} มีผลการประเมิน <strong>อยู่ในกลุ่ม "ใกล้ชิด"</strong> ${rangeText} โดยมีคะแนนความรับผิดชอบรวม <strong>${composite}%</strong> และเข้าเกณฑ์ติดตามเนื่องจาก ${reason}</div>
+<div style="margin:8px 0"><strong>รายละเอียดผลการประเมิน:</strong>${details}</div>
+<div class="indent">โรงเรียนจึงขอความร่วมมือจากท่านในการดูแล ติดตาม และให้กำลังใจนักเรียนในการเข้าเรียนและร่วมกิจกรรมอย่างสม่ำเสมอ หากนักเรียนยังมีผลการประเมินอยู่ในกลุ่มนี้อีก ทางโรงเรียนจะพิจารณามอบหมายกิจกรรมเพื่อปรับปรุงพฤติกรรมตามระเบียบของโรงเรียนต่อไป</div>
+<div class="indent">จึงเรียนมาเพื่อโปรดพิจารณาให้ความร่วมมือ และขอขอบคุณมา ณ โอกาสนี้</div>
+<div class="signature"><div>ขอแสดงความนับถือ</div><div style="margin-top:40px">ลงชื่อ .....................................................</div><div>(${teacherName})</div><div>ครูที่ปรึกษา</div><div style="margin-top:20px">ลงชื่อ .....................................................</div><div>(${director})</div><div>ผู้อำนวยการ${school}</div></div>
+<div class="cut-line"></div><div class="ack-title">✂️ หนังสือตอบรับ</div><div class="ack-body">
+  <div style="text-align:right;margin-bottom:10px">เขียนที่ .........................................<br>วันที่ ......... / ......... / .........</div>
+  <div style="margin-bottom:10px"><strong>เรื่อง</strong> ตอบรับหนังสือแจ้งเตือน</div>
+  <div style="margin-bottom:10px"><strong>เรียน</strong> ผู้อำนวยการ${school}</div>
+  <div class="indent">ตามที่โรงเรียนได้มีหนังสือที่ ${docNo} ลงวันที่ ${docDateThai} แจ้งเตือนเกี่ยวกับการเข้าเรียนและการร่วมกิจกรรมของ <strong>${studentName}</strong> นั้น</div>
+  <div class="indent">ข้าพเจ้า ..................................................... ผู้ปกครองของ ${studentName} ได้รับหนังสือแจ้งเตือนดังกล่าวแล้ว และจะให้ความร่วมมือในการดูแล ติดตาม และให้กำลังใจนักเรียนในการเข้าเรียนและร่วมกิจกรรมอย่างสม่ำเสมอ</div>
+  <div style="text-align:right;margin-top:30px"><div>ลงชื่อ ..................................................... ผู้ปกครอง</div><div style="margin-top:6px">( ..................................................... )</div><div style="margin-top:6px">วันที่ ......... / ......... / .........</div></div>
+</div></body></html>`;
+}
+
+async function printBehaviorActivity(student) {
+  // Open the print window synchronously from the click gesture to avoid popup blockers.
+  const win = window.open('', '_blank');
+  if (!win) {
+    Swal.fire('แจ้งเตือน', 'กรุณาอนุญาต Pop-up เพื่อพิมพ์หนังสือ', 'warning');
+    return;
+  }
+  $.LoadingOverlay('show', { text: 'กำลังเตรียมเอกสาร...' });
+  try {
+    const history = currentPrintTarget && currentPrintTarget.history ? currentPrintTarget.history : { redCount: null };
+    const docNo = $('#print-doc-no').val() || '............';
+    const school = $('#print-school').val() || 'โรงเรียน';
+    const director = $('#print-director').val() || '....................................';
+    const docDate = $('#print-doc-date').val() || new Date().toISOString().split('T')[0];
+    const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
+    const teacherName = teacher.name || '....................................';
+    const activities = $('.print-act-check:checked').map(function() { return $(this).val(); }).get();
+    const actStart = $('#print-act-start').val() || '';
+    const actEnd = $('#print-act-end').val() || '';
+    const period = riskState.lastData.period;
+    const rangeText = `ตั้งแต่วันที่ ${formatThaiDate(period.startDate)} ถึง ${formatThaiDate(period.endDate)}`;
+    const html = buildBehaviorActivityHtml({
+      school: school, docNo: docNo, docDate: docDate, director: director, teacherName: teacherName,
+      student: student, rangeText: rangeText, activities: activities,
+      actStart: actStart, actEnd: actEnd, redCount: history.redCount,
+      composite: student.composite, streak: student.streak
+    });
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+    await logGeneratedRiskDocument('activity', student.id, $('#print-doc-no').val());
+  } catch (error) {
+    if (!win.closed) win.close();
+    Swal.fire('ผิดพลาด', error.message || 'เตรียมหนังสือไม่สำเร็จ', 'error');
+  } finally {
+    $.LoadingOverlay('hide');
+  }
+}
+
+function buildBehaviorActivityHtml(options) {
+  const escape = riskEscapeHtml;
+  const school = escape(options.school);
+  const student = options.student || {};
+  const studentName = escape(student.name);
+  const classroomName = escape(student.classroom_name);
+  const studentId = escape(student.id);
+  const composite = options.composite == null ? '—' : escape(options.composite);
+  const streak = Number(options.streak) || 0;
+  const activities = Array.isArray(options.activities) ? options.activities : [];
+  const activitiesHtml = activities.length
+    ? activities.map(function(activity) { return `<div style="padding-left:3cm;text-indent:-1cm;margin:4px 0">☐ ${escape(activity)}</div>`; }).join('')
+    : '<div style="padding-left:2.5cm">(ไม่ได้ระบุกิจกรรม)</div>';
+  const docNo = escape(options.docNo);
+  const docDateThai = formatThaiDateLong(options.docDate);
+  const startThai = options.actStart ? formatThaiDateLong(options.actStart) : '................';
+  const endThai = options.actEnd ? formatThaiDateLong(options.actEnd) : '................';
+  const director = escape(options.director);
+  const teacherName = escape(options.teacherName);
+  const rangeText = escape(options.rangeText);
+  const redCount = options.redCount == null
+    ? 'ไม่สามารถโหลดประวัติได้' : `${escape(options.redCount)} ครั้ง`;
+
+  return `<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8"><title>หนังสือทำกิจกรรมเพื่อปรับปรุงพฤติกรรม</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  @page { size:A4; margin:2cm 2cm 2cm 2.5cm; }
+  body { font-family:'TH Sarabun New','TH SarabunPSK','Sarabun',sans-serif; font-size:16pt; line-height:1.4; margin:0; color:#000; }
+  .toolbar { position:fixed; top:10px; right:10px; background:#fff; padding:8px; border-radius:8px; box-shadow:0 2px 10px #0002; z-index:999; }
+  .toolbar button { padding:6px 14px; border:1px solid #ccc; border-radius:6px; cursor:pointer; font-weight:bold; }
+  @media print { .toolbar { display:none; } }
+  .garuda { text-align:center; font-size:40pt; line-height:1; margin-bottom:4px; }
+  .header { text-align:center; font-size:18pt; font-weight:bold; margin-bottom:4px; }
+  .header-sub { text-align:center; font-size:16pt; margin-bottom:24px; }
+  .meta { display:flex; justify-content:space-between; margin-bottom:16px; }
+  .indent { text-indent:2.5cm; text-align:justify; margin:8px 0; }
+  .signature { margin-top:30px; }
+  .signature-row { display:flex; justify-content:space-between; text-align:center; margin-top:40px; }
+  .signature-row > div { width:45%; }
+  .note { background:#fefce8; border:1px solid #fcd34d; padding:10px; margin:10px 0; font-size:14pt; }
+</style></head><body>
+<div class="toolbar"><button onclick="window.print()">🖨️ พิมพ์ / บันทึก PDF</button></div>
+<div class="garuda">🦁</div><div class="header">${school}</div><div class="header-sub">${school}</div>
+<div class="meta"><div>ที่ ${docNo}</div><div>${docDateThai}</div></div>
+<div style="margin:16px 0"><strong>เรื่อง</strong> มอบหมายกิจกรรมเพื่อปรับปรุงพฤติกรรม</div>
+<div style="margin-bottom:8px"><strong>เรียน</strong> ${studentName}</div>
+<div class="indent">ด้วย ${school} ได้ติดตามพฤติกรรมของ <strong>${studentName}</strong> นักเรียนชั้น ${classroomName} เลขประจำตัว ${studentId} พบว่าในช่วง ${rangeText} นักเรียนมีผลการประเมิน <strong>อยู่ในกลุ่ม "ใกล้ชิด"</strong> (คะแนน ${composite}%)${streak > 0 ? ` และมีประวัติขาดเรียนติดต่อกัน ${escape(streak)} วัน` : ''} ซึ่งเข้าเกณฑ์ติดตามของโรงเรียน</div>
+<div class="note"><strong>⚠️ หมายเหตุ:</strong> นักเรียนมีประวัติผลการประเมินอยู่ในกลุ่ม "ใกล้ชิด" จำนวน <strong>${redCount}</strong> ในช่วง 8 สัปดาห์ที่ผ่านมา โรงเรียนจึงพิจารณามอบหมายกิจกรรมเพื่อปรับปรุงพฤติกรรมตามระเบียบของโรงเรียน</div>
+<div class="indent">โรงเรียนจึงขอให้นักเรียนดำเนินกิจกรรมเพื่อปรับปรุงพฤติกรรม ดังต่อไปนี้</div>
+<div style="margin:10px 0">${activitiesHtml}</div>
+<div class="indent"><strong>ระยะเวลาดำเนินการ:</strong> ตั้งแต่วันที่ ${startThai} ถึง ${endThai}</div>
+<div class="indent">ขอให้นักเรียนรายงานผลการดำเนินการต่อครูที่ปรึกษาตามกำหนด หากไม่ดำเนินการหรือไม่ผ่านการประเมิน ทางโรงเรียนจะพิจารณาดำเนินการตามระเบียบวินัยของโรงเรียนต่อไป</div>
+<div class="indent">จึงเรียนมาเพื่อโปรดทราบและดำเนินการ</div>
+<div class="signature"><div style="text-align:right">ขอแสดงความนับถือ</div><div style="text-align:right;margin-top:40px">ลงชื่อ .....................................................</div><div style="text-align:right">(${teacherName})</div><div style="text-align:right">ครูที่ปรึกษา</div></div>
+<div class="signature-row"><div><div>ลงชื่อ ..................................................... นักเรียน</div><div style="margin-top:6px">(${studentName})</div><div style="margin-top:6px">วันที่ ......... / ......... / .........</div></div><div><div>ลงชื่อ ..................................................... ผู้ปกครอง</div><div style="margin-top:6px">( ..................................................... )</div><div style="margin-top:6px">วันที่ ......... / ......... / .........</div></div></div>
+<div class="signature" style="text-align:right;margin-top:30px"><div style="margin-top:20px">ลงชื่อ .....................................................</div><div>(${director})</div><div>ผู้อำนวยการ${school}</div></div>
+</body></html>`;
+}
+
+function formatThaiDate(dateString) {
+  if (!dateString) return '';
+  const parts = String(dateString).split('-');
+  if (parts.length !== 3) return String(dateString);
+  return `${parseInt(parts[2], 10)}/${parseInt(parts[1], 10)}/${parseInt(parts[0], 10) + 543}`;
+}
+
+function formatThaiDateLong(dateString) {
+  if (!dateString) return '...............';
+  const months = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
+  const parts = String(dateString).split('-');
+  if (parts.length !== 3) return riskEscapeHtml(dateString);
+  const month = parseInt(parts[1], 10) - 1;
+  if (month < 0 || month > 11) return '...............';
+  return `${parseInt(parts[2], 10)} ${months[month]} ${parseInt(parts[0], 10) + 543}`;
 }
 </script>

@@ -68,6 +68,8 @@ const CLEANING_SHEET_NAMES = {
   CRITERIA: 'Cleaning_Criteria'
 };
 
+const RISK_ACTION_LOG_SHEET_NAME = 'Risk_Action_Log';
+
 // Headers for each sheet
 const HEADERS = {
   [SHEET_NAMES.CONFIG]: ['key', 'value'],
@@ -81,7 +83,8 @@ const HEADERS = {
   // 2. เพิ่มหัวตารางสำหรับระบบเขตพื้นที่ (ป้องกัน Error จำนวนคอลัมน์เป็น 0)
   [CLEANING_SHEET_NAMES.ATTENDANCE]: ['Date', 'Classroom ID', 'Checker ID', 'Student Data', 'Updated At'],
   [CLEANING_SHEET_NAMES.SCORES]: ['Date', 'Classroom ID', 'Checker ID', 'Scores', 'Total Score', 'Updated At'],
-  [CLEANING_SHEET_NAMES.CRITERIA]: ['ID', 'Name', 'Max Score']
+  [CLEANING_SHEET_NAMES.CRITERIA]: ['ID', 'Name', 'Max Score'],
+  [RISK_ACTION_LOG_SHEET_NAME]: ['timestamp', 'action', 'document_type', 'student_id', 'assessment_start', 'assessment_end', 'document_no', 'actor_name']
 };
 
 // API Version
@@ -2780,4 +2783,110 @@ function getRedFlagStudents(startDate, endDate, classroomFilter) {
   if (result.status !== 'success') return result;
   const students = result.data.students.filter(function(student) { return student.category === 'red'; });
   return { status: 'success', data: { period: result.data.period, total: students.length, students: students } };
+}
+
+// ========================================
+// PHASE 3.6: Risk History + Print Support
+// ========================================
+
+/**
+ * ดึงประวัติ Red/Yellow ของนักเรียนย้อนหลังตามจำนวนสัปดาห์
+ * เพื่อประกอบการเลือกเอกสารสำหรับพิมพ์
+ */
+function getStudentRiskHistory(studentId, weeksBack, classroomFilter) {
+  try {
+    weeksBack = weeksBack || 8;
+    const today = new Date();
+    const results = [];
+
+    for (let i = weeksBack - 1; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i * 7);
+      const dow = d.getDay();
+      const monday = new Date(d);
+      monday.setDate(d.getDate() - dow + (dow === 0 ? -6 : 1));
+      const friday = new Date(monday);
+      friday.setDate(monday.getDate() + 4);
+
+      const start = Utilities.formatDate(monday, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      const end = Utilities.formatDate(friday, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+
+      const weights = getRiskWeights().data;
+      const assessment = getStudentRiskAssessment(start, end, classroomFilter || '', JSON.stringify(weights));
+      if (assessment.status === 'success') {
+        const student = (assessment.data.students || []).find(function(item) {
+          return item.id === String(studentId) && (!classroomFilter || item.classroom_id === String(classroomFilter));
+        });
+        if (student) {
+          results.push({
+            startDate: start,
+            endDate: end,
+            composite: student.composite,
+            category: student.category,
+            streak: student.streak,
+            breakdown: student.breakdown
+          });
+        }
+      }
+    }
+
+    const redCount = results.filter(function(item) { return item.category === 'red'; }).length;
+    const yellowCount = results.filter(function(item) { return item.category === 'yellow'; }).length;
+    return {
+      status: 'success',
+      data: {
+        weeks: results,
+        redCount: redCount,
+        yellowCount: yellowCount,
+        recommendation: redCount >= 3 ? 'activity' : redCount >= 1 ? 'warning' : 'none'
+      }
+    };
+  } catch (err) {
+    Logger.log('Error in getStudentRiskHistory: ' + err.message);
+    return { status: 'error', message: err.toString() };
+  }
+}
+
+/**
+ * บันทึกเฉพาะการสร้างเอกสารพิมพ์ ไม่ได้บันทึกการออกหนังสือหรือการติดต่อผู้ปกครอง
+ * เพิ่มแถวใหม่เท่านั้น; ไม่แก้ไขหรือลบรายการเดิม
+ */
+function logRiskDocumentGeneration(documentType, studentId, startDate, endDate, documentNo, actorName) {
+  let lock;
+  let lockAcquired = false;
+  try {
+    const allowedTypes = ['warning', 'activity', 'summary'];
+    const type = String(documentType || '').trim();
+    if (allowedTypes.indexOf(type) === -1) return { status: 'error', message: 'ประเภทเอกสารไม่ถูกต้อง' };
+
+    const start = String(startDate || '').trim();
+    const end = String(endDate || '').trim();
+    const validDate = function(value) { return !value || /^\d{4}-\d{2}-\d{2}$/.test(value); };
+    if (!validDate(start) || !validDate(end) || (start && end && start > end)) {
+      return { status: 'error', message: 'ช่วงวันที่ประเมินไม่ถูกต้อง' };
+    }
+
+    const lockService = LockService.getScriptLock();
+    lock = lockService;
+    if (!lock.tryLock(10000)) return { status: 'error', message: 'Server busy' };
+    lockAcquired = true;
+
+    const sheet = getOrCreateSheet(RISK_ACTION_LOG_SHEET_NAME);
+    sheet.appendRow([
+      new Date(),
+      'สร้างเอกสาร',
+      type,
+      String(studentId || '').trim().slice(0, 100),
+      start,
+      end,
+      String(documentNo || '').trim().slice(0, 150),
+      String(actorName || '').trim().slice(0, 150)
+    ]);
+    return { status: 'success', message: 'บันทึกการสร้างเอกสารแล้ว' };
+  } catch (err) {
+    Logger.log('Error in logRiskDocumentGeneration: ' + (err.message || err));
+    return { status: 'error', message: err.message || String(err) };
+  } finally {
+    if (lock && lockAcquired) lock.releaseLock();
+  }
 }
