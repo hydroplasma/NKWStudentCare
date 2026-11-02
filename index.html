@@ -798,10 +798,18 @@
         <label class="block text-gray-500 text-sm font-bold mb-1">🏫 ห้อง</label>
         <select id="disc-classroom" class="w-full"><option value="">ทุกห้อง</option></select>
       </div>
-      <div class="flex items-end gap-2">
+      <div class="flex items-end gap-2 flex-wrap">
         <button id="disc-refresh" class="flex-1 px-4 py-2 bg-gray-100 rounded-xl font-bold active:scale-95">🔄 โหลดใหม่</button>
         <button id="disc-sync" class="flex-1 px-4 py-2 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-xl font-bold shadow-lg active:scale-95">📥 Sync สัปดาห์นี้</button>
+        <button id="disc-export" class="flex-1 px-4 py-2 bg-emerald-700 text-white rounded-xl font-bold shadow-lg active:scale-95">📊 Export CSV</button>
       </div>
+    </div>
+  </div>
+
+  <div class="app-card p-5 mb-5">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+      <div class="bg-gray-50 p-4 rounded-2xl h-72"><canvas id="disc-pie-chart" aria-label="สัดส่วนเคสตาม Stage"></canvas></div>
+      <div class="bg-gray-50 p-4 rounded-2xl h-72"><canvas id="disc-bar-chart" aria-label="จำนวนเคสตามห้อง"></canvas></div>
     </div>
   </div>
 
@@ -919,58 +927,6 @@
     <div class="p-5 flex gap-3">
       <button onclick="$('#disc-sig-modal').hide()" class="flex-1 py-3 bg-gray-100 rounded-2xl font-bold">ยกเลิก</button>
       <button id="disc-sig-save" class="flex-1 py-3 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-2xl font-bold">💾 บันทึก</button>
-    </div>
-  </div>
-</div>
-
-<!-- Print Config Modal: prepares documents for printing only; it does not contact guardians. -->
-<div id="print-config-modal" class="fixed inset-0 z-[60] items-center justify-center bg-black/50 backdrop-blur-sm p-4" style="display:none;">
-  <div class="app-card w-full max-w-lg bg-white rounded-3xl overflow-hidden">
-    <div class="flex justify-between items-center p-5 bg-gradient-to-r from-slate-800 to-slate-900 text-white">
-      <h2 id="print-config-title" class="text-lg font-bold">🖨️ ตั้งค่าการพิมพ์</h2>
-      <button type="button" onclick="$('#print-config-modal').hide()" class="text-white text-2xl hover:opacity-75" aria-label="ปิด">×</button>
-    </div>
-    <div class="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
-      <div>
-        <label for="print-doc-type" class="block text-sm font-bold mb-1">📋 ประเภทเอกสาร</label>
-        <select id="print-doc-type" class="w-full">
-          <option value="warning">📄 หนังสือแจ้งเตือนผู้ปกครอง</option>
-          <option value="activity">📋 หนังสือทำกิจกรรมเพื่อปรับปรุงพฤติกรรม</option>
-        </select>
-        <p id="print-history-summary" class="mt-1 text-xs text-gray-500" aria-live="polite"></p>
-      </div>
-      <div>
-        <label for="print-school" class="block text-sm font-bold mb-1">🏫 โรงเรียน</label>
-        <input type="text" id="print-school" class="w-full" placeholder="เช่น โรงเรียนน้ำคำวิทยา">
-      </div>
-      <div>
-        <label for="print-doc-no" class="block text-sm font-bold mb-1">📮 ที่</label>
-        <input type="text" id="print-doc-no" class="w-full" placeholder="เช่น ศธ 04201/1234">
-      </div>
-      <div>
-        <label for="print-doc-date" class="block text-sm font-bold mb-1">📅 วันที่ออกหนังสือ</label>
-        <input type="text" id="print-doc-date" class="w-full">
-      </div>
-      <div>
-        <label for="print-director" class="block text-sm font-bold mb-1">👨‍💼 ผู้อำนวยการ</label>
-        <input type="text" id="print-director" class="w-full" placeholder="ชื่อ-สกุล ผู้อำนวยการ">
-      </div>
-
-      <div id="print-activity-options" class="space-y-2 p-3 bg-blue-50 rounded-2xl hidden">
-        <p class="text-sm font-bold text-blue-800 mb-2">📋 กิจกรรมที่มอบหมาย (เลือกได้หลายข้อ)</p>
-        <label class="flex items-center gap-2 text-sm"><input type="checkbox" class="print-act-check" value="เข้าร่วมกิจกรรมบำเพ็ญประโยชน์ จำนวน ___ ชั่วโมง" checked><span>บำเพ็ญประโยชน์</span></label>
-        <label class="flex items-center gap-2 text-sm"><input type="checkbox" class="print-act-check" value="ทำความสะอาดเขตพื้นที่ จำนวน ___ ครั้ง" checked><span>ทำความสะอาดเขตพื้นที่</span></label>
-        <label class="flex items-center gap-2 text-sm"><input type="checkbox" class="print-act-check" value="ส่งงานที่ค้าง จำนวน ___ ชิ้น"><span>ส่งงานที่ค้าง</span></label>
-        <label class="flex items-center gap-2 text-sm"><input type="checkbox" class="print-act-check" value="เข้าร่วมกิจกรรมแนะแนว / รับคำปรึกษา จำนวน ___ ครั้ง" checked><span>รับคำปรึกษา / แนะแนว</span></label>
-        <div class="grid grid-cols-2 gap-2 mt-2">
-          <div><label for="print-act-start" class="block text-xs font-bold">เริ่ม</label><input type="text" id="print-act-start" class="w-full text-sm"></div>
-          <div><label for="print-act-end" class="block text-xs font-bold">ถึง</label><input type="text" id="print-act-end" class="w-full text-sm"></div>
-        </div>
-      </div>
-    </div>
-    <div class="p-5 flex gap-3">
-      <button type="button" onclick="$('#print-config-modal').hide()" class="flex-1 py-3 bg-gray-100 rounded-2xl font-bold">ยกเลิก</button>
-      <button id="print-config-confirm" type="button" class="flex-1 py-3 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-2xl font-bold">🖨️ พิมพ์</button>
     </div>
   </div>
 </div>
