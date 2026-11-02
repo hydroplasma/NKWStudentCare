@@ -1683,22 +1683,22 @@ function getSubjectAttendanceForEdit(date, subjectCode, subjectName, gradeLevel,
 
 function getTeacherSubjectSchedule(teacherEmail, targetDate) {
   try {
-    Logger.log('📅 getTeacherSubjectSchedule: email="' + teacherEmail + '", date="' + targetDate + '"');
-
-    // ✅ ใช้ getSpreadsheet() ให้เหมือนระบบส่วนอื่น
+    Logger.log('📅 getTeacherSubjectSchedule: date="' + targetDate + '"');
     var ss = getSpreadsheet();
+    if (!ss) throw new Error('ไม่สามารถเปิด Spreadsheet (ตรวจสอบ SPREADSHEET_ID)');
+
     var sheet = ss.getSheetByName("Timetable");
     if (!sheet) {
       Logger.log('⚠️ ไม่พบชีต Timetable');
       return { status: "success", data: [], message: "ยังไม่มีชีต Timetable" };
     }
 
-    var data = sheet.getDataRange().getValues();
-    Logger.log('📊 Timetable rows (รวม header): ' + data.length);
-
-    if (data.length <= 1) {
+    var lastRow = sheet.getLastRow();
+    if (lastRow <= 1) {
       return { status: "success", data: [], message: "ชีต Timetable ว่าง" };
     }
+    var data = sheet.getRange(1, 1, lastRow, 9).getValues();
+    Logger.log('📊 Timetable rows (รวม header): ' + data.length);
 
     // ✅ แปลงวันที่แบบ local (กัน timezone เพี้ยน)
     var dateObj;
@@ -1712,19 +1712,17 @@ function getTeacherSubjectSchedule(teacherEmail, targetDate) {
     var days = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์"];
     var dayName = days[dateObj.getDay()];
     var normEmail = String(teacherEmail || '').trim().toLowerCase();
-
-    Logger.log('🗓️ Day = ' + dayName + ', looking for email = "' + normEmail + '"');
+    Logger.log('🗓️ Day = ' + dayName + ', matching teacher schedule');
 
     var result = [];
-    var emailsInSheet = {};
 
     for (var i = 1; i < data.length; i++) {
       var row = data[i];
+      if (!row || row.length < 9) continue;
+
       var rowDay = String(row[1] || '').trim();
       var rowEmail = String(row[5] || '').trim();
       var rowEmailNorm = rowEmail.toLowerCase();
-
-      if (rowEmailNorm) emailsInSheet[rowEmailNorm] = true;
 
       if (rowDay === dayName && rowEmailNorm === normEmail) {
         result.push({
@@ -1739,13 +1737,14 @@ function getTeacherSubjectSchedule(teacherEmail, targetDate) {
       }
     }
 
-    Logger.log('✅ พบ ' + result.length + ' คาบ | Emails ที่มีใน Timetable: ' + Object.keys(emailsInSheet).join(', '));
+    Logger.log('✅ พบ ' + result.length + ' คาบ');
 
     return { status: "success", data: result };
 
   } catch (e) {
-    Logger.log('❌ Error in getTeacherSubjectSchedule: ' + e.message + '\n' + e.stack);
-    return { status: "error", message: e.message, data: [] };
+    var message = e && e.message ? String(e.message) : 'Unknown server error';
+    Logger.log('❌ Error in getTeacherSubjectSchedule');
+    return { status: "error", message: message, data: [] };
   }
 }
 

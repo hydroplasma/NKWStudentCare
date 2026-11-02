@@ -125,71 +125,152 @@
     });
 
     function loadTeacherSchedule(dateStr, preselectSubject) {
-  const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
-  const teacherEmail = teacher.email || teacher.username;
-
-  console.log('[loadTeacherSchedule] date =', dateStr, ', email =', teacherEmail);
-
-  if (!teacherEmail) {
-    Swal.fire('ผิดพลาด', 'ไม่พบข้อมูลครูผู้ใช้ระบบ', 'error');
-    return;
-  }
-
-  Swal.fire({
-    title: 'กำลังโหลดตารางสอน...',
-    html: `<div style="color:#666;font-size:14px;margin-top:8px;">วันที่ ${formatDateThai(dateStr)}</div>`,
-    allowOutsideClick: false,
-    allowEscapeKey: false,
-    didOpen: () => Swal.showLoading()
-  });
-
-  const select = $('#subject-schedule-select');
-  select.html('<option value="">-- กำลังโหลด... --</option>');
-  $('#subject-attendance-container').addClass('hidden');
-  selectedSchedule = null;
-  currentScheduleList = [];
-
-  google.script.run
-    .withSuccessHandler(function(res) {
-      console.log('[getTeacherSubjectSchedule] response =', res);
-      Swal.close();
-
-      if (res && res.status === 'success') {
-        currentScheduleList = res.data || [];
-        select.empty();
-        select.append('<option value="">-- กรุณาเลือกคาบสอน --</option>');
-
-        if (currentScheduleList.length === 0) {
-          const hint = res.message ? ` (${res.message})` : '';
-          select.html(`<option value="">-- ไม่มีตารางสอนในวันนี้${hint} --</option>`);
-          return;
-        }
-
-        let preselectIndex = -1;
-        currentScheduleList.forEach((sch, index) => {
-          let codeText = sch.subjectCode ? ` (${sch.subjectCode})` : '';
-          let roomText = "";
-          if (sch.gradeLevel && sch.room) roomText = ` - ${sch.gradeLevel}/${sch.room}`;
-          else if (sch.gradeLevel || sch.room) roomText = ` - ${sch.gradeLevel || sch.room}`;
-          select.append(`<option value="${index}">คาบที่ ${sch.period} : ${sch.subjectName}${codeText}${roomText}</option>`);
-          if (preselectSubject && sch.subjectCode === preselectSubject && preselectIndex === -1) preselectIndex = index;
-        });
-        if (preselectIndex >= 0) select.val(String(preselectIndex)).trigger('change');
-      } else {
-        const errMsg = (res && res.message) ? res.message : 'response ไม่ถูกต้อง';
-        select.html(`<option value="">-- โหลดไม่สำเร็จ: ${errMsg} --</option>`);
-        Swal.fire('ผิดพลาด', 'ไม่สามารถโหลดตารางสอนได้: ' + errMsg, 'error');
+      let teacher = {};
+      try {
+        teacher = JSON.parse(localStorage.getItem('teacher') || '{}') || {};
+      } catch (error) {
+        console.warn('[loadTeacherSchedule] Teacher data is unavailable.');
       }
-    })
-    .withFailureHandler(function(err) {
-      console.error('[getTeacherSubjectSchedule] FAILED =', err);
-      Swal.close();
-      const msg = (err && err.message) ? err.message : 'Unknown error';
-      select.html(`<option value="">-- โหลดไม่สำเร็จ: ${msg} --</option>`);
-      Swal.fire('ผิดพลาด', 'ไม่สามารถโหลดตารางสอนได้: ' + msg, 'error');
-    })
-    .getTeacherSubjectSchedule(teacherEmail, dateStr);
-}
+      const teacherEmail = teacher.email || teacher.username;
+      const select = $('#subject-schedule-select');
+      const setSelectMessage = function(message) {
+        select.empty().append($('<option>', { value: '', text: message }));
+      };
+
+      console.log('[loadTeacherSchedule] date =', dateStr);
+
+      if (!teacherEmail) {
+        Swal.fire('ผิดพลาด', 'ไม่พบข้อมูลครูผู้ใช้ระบบ', 'error');
+        return;
+      }
+
+      Swal.fire({
+        title: 'กำลังโหลดตารางสอน...',
+        html: `<div style="color:#666;font-size:14px;margin-top:8px;">วันที่ ${formatDateThai(dateStr)}</div>`,
+        allowOutsideClick: false,
+        allowEscapeKey: false,
+        didOpen: () => Swal.showLoading()
+      });
+
+      setSelectMessage('-- กำลังโหลด... --');
+      $('#subject-attendance-container').addClass('hidden');
+      selectedSchedule = null;
+      currentScheduleList = [];
+
+      google.script.run
+        .withSuccessHandler(function(res) {
+          const responseType = typeof res;
+          const responseStatus = res && responseType === 'object' ? res.status : undefined;
+          console.log('[getTeacherSubjectSchedule] response type/status:', responseType, responseStatus);
+          Swal.close();
+
+          if (res === null || res === undefined) {
+            setSelectMessage('-- Server ไม่ตอบสนอง (timeout) --');
+            Swal.fire({
+              icon: 'error',
+              title: 'ไม่ได้รับข้อมูลจาก Server',
+              html: `
+                <div class="text-sm text-left">
+                  <p>Server ไม่ส่งข้อมูลกลับมา อาจเกิดจาก:</p>
+                  <ul class="list-disc pl-5 mt-2 text-xs">
+                    <li>Timeout (ข้อมูล Timetable ใหญ่มาก)</li>
+                    <li>Apps Script Error (ดูที่ Execution log)</li>
+                  </ul>
+                  <p class="mt-2"><b>แนะนำ:</b> กดลองใหม่ หรือตรวจสอบ Execution log</p>
+                </div>
+              `,
+              confirmButtonText: 'ลองใหม่',
+              showCancelButton: true,
+              cancelButtonText: 'ปิด'
+            }).then(function(result) {
+              if (result.isConfirmed) loadTeacherSchedule(dateStr, preselectSubject);
+            });
+            return;
+          }
+
+          if (typeof res === 'string') {
+            setSelectMessage('-- Server ส่งข้อมูลผิดรูปแบบ --');
+            Swal.fire({
+              icon: 'error',
+              title: 'ข้อมูลผิดรูปแบบ',
+              text: res.substring(0, 300),
+              confirmButtonText: 'รับทราบ'
+            });
+            return;
+          }
+
+          if (typeof res !== 'object' || Array.isArray(res) || !Object.prototype.hasOwnProperty.call(res, 'status')) {
+            setSelectMessage('-- Server ส่งข้อมูลผิดรูปแบบ --');
+            Swal.fire({
+              icon: 'error',
+              title: 'ข้อมูลผิดรูปแบบ',
+              text: 'Server ส่ง response ที่ไม่มี status หรือมีรูปแบบไม่ถูกต้อง',
+              confirmButtonText: 'รับทราบ'
+            });
+            return;
+          }
+
+          if (res.status === 'success') {
+            if (!Array.isArray(res.data)) {
+              setSelectMessage('-- Server ส่งข้อมูลผิดรูปแบบ --');
+              Swal.fire({
+                icon: 'error',
+                title: 'ข้อมูลผิดรูปแบบ',
+                text: 'ข้อมูลตารางสอนจาก Server ไม่ถูกต้อง',
+                confirmButtonText: 'รับทราบ'
+              });
+              return;
+            }
+
+            currentScheduleList = res.data.filter(function(schedule) {
+              return schedule && typeof schedule === 'object' && !Array.isArray(schedule);
+            });
+            select.empty().append($('<option>', { value: '', text: '-- กรุณาเลือกคาบสอน --' }));
+
+            if (currentScheduleList.length === 0) {
+              const hint = res.message ? ` (${res.message})` : '';
+              setSelectMessage(`-- ไม่มีตารางสอนในวันนี้${hint} --`);
+              return;
+            }
+
+            let preselectIndex = -1;
+            currentScheduleList.forEach(function(sch, index) {
+              let roomText = '';
+              if (sch.gradeLevel && sch.room) roomText = ` - ${sch.gradeLevel}/${sch.room}`;
+              else if (sch.gradeLevel || sch.room) roomText = ` - ${sch.gradeLevel || sch.room}`;
+              const codeText = sch.subjectCode ? ` (${sch.subjectCode})` : '';
+              const optionText = `คาบที่ ${sch.period} : ${sch.subjectName || ''}${codeText}${roomText}`;
+              select.append($('<option>', { value: String(index), text: optionText }));
+              if (preselectSubject && sch.subjectCode === preselectSubject && preselectIndex === -1) {
+                preselectIndex = index;
+              }
+            });
+            if (preselectIndex >= 0) select.val(String(preselectIndex)).trigger('change');
+          } else {
+            const errMsg = typeof res.message === 'string' && res.message
+              ? res.message
+              : 'response ไม่ถูกต้อง (status: ' + String(res.status) + ')';
+            setSelectMessage('-- โหลดไม่สำเร็จ: ' + errMsg + ' --');
+            Swal.fire({
+              icon: 'error',
+              title: 'ผิดพลาด',
+              text: 'ไม่สามารถโหลดตารางสอนได้: ' + errMsg
+            });
+          }
+        })
+        .withFailureHandler(function(err) {
+          console.error('[getTeacherSubjectSchedule] Request failed.');
+          Swal.close();
+          const msg = (err && typeof err.message === 'string') ? err.message : 'Unknown error';
+          setSelectMessage('-- โหลดไม่สำเร็จ: ' + msg + ' --');
+          Swal.fire({
+            icon: 'error',
+            title: 'ผิดพลาด',
+            text: 'ไม่สามารถโหลดตารางสอนได้: ' + msg
+          });
+        })
+        .getTeacherSubjectSchedule(teacherEmail, dateStr);
+    }
 
     function formatDateThai(dateStr) {
       try {
@@ -372,7 +453,7 @@
           if (res && res.status === 'success') {
             Swal.fire({
               title: 'สำเร็จ',
-              html: `${res.message || 'บันทึกเรียบร้อย'}<br><small class="text-gray-500">${formatDateThai(date)}</small>`,
+              text: (res.message || 'บันทึกเรียบร้อย') + ' — ' + formatDateThai(date),
               icon: 'success',
               timer: 2000,
               showConfirmButton: false
