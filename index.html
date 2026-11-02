@@ -364,6 +364,7 @@
   <button class="nav-tab" data-tab="overall-summary">🏫 ภาพรวม</button>
   <button class="nav-tab" data-tab="attendance-stats">📊 สถิติเข้าแถว</button>
   <button class="nav-tab" data-tab="weekly-summary">📆 สรุปรายสัปดาห์</button>
+  <button class="nav-tab" data-tab="risk-assessment">🎯 ประเมินความเสี่ยง</button>
 </div>
     </div>
 
@@ -835,6 +836,107 @@
       </table>
     </div>
   </div>
+</div>
+
+
+<!-- ===== Student Risk Assessment ===== -->
+<div id="risk-assessment" class="tab-content hidden">
+  <div class="app-card p-5 mb-5">
+    <div class="flex flex-col md:flex-row gap-3 items-end flex-wrap">
+      <div>
+        <label for="risk-view-mode" class="block text-gray-500 text-sm font-bold mb-1">📅 รูปแบบ</label>
+        <select id="risk-view-mode" class="w-full">
+          <option value="week">รายสัปดาห์</option>
+          <option value="month">รายเดือน</option>
+        </select>
+      </div>
+      <div>
+        <label for="risk-date-display" class="block text-gray-500 text-sm font-bold mb-1">📅 ช่วงวันที่</label>
+        <input type="text" id="risk-date-display" class="w-full" readonly style="min-width:220px;">
+      </div>
+      <div>
+        <label for="risk-classroom" class="block text-gray-500 text-sm font-bold mb-1">🏫 ห้อง</label>
+        <select id="risk-classroom" class="w-full"><option value="">ทุกห้อง</option></select>
+      </div>
+      <div class="flex gap-2 ml-auto flex-wrap">
+        <button id="risk-settings-btn" type="button" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-xl font-bold">⚙️ ตั้งค่า</button>
+        <button id="risk-prev" type="button" class="px-3 py-2 bg-gray-100 rounded-xl font-bold" aria-label="ช่วงก่อนหน้า">◀</button>
+        <button id="risk-next" type="button" class="px-3 py-2 bg-gray-100 rounded-xl font-bold" aria-label="ช่วงถัดไป">▶</button>
+        <button id="risk-run" type="button" class="px-6 py-2 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-xl font-bold shadow-lg">🔍 ประเมิน</button>
+      </div>
+    </div>
+    <div class="mt-2 text-xs text-gray-400">⚙️ น้ำหนักปัจจุบัน: <span id="risk-weights-display">เข้าแถว 40% | เขตพื้นที่ 30% | เข้าเรียน 30%</span></div>
+  </div>
+
+  <div id="risk-empty" class="app-card p-5 text-center py-12 text-gray-400">เลือกช่วงวันที่แล้วกดประเมิน</div>
+  <div id="risk-content" class="hidden">
+    <div class="app-card p-5 mb-5">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div class="p-4 rounded-2xl" style="background:#fef2f2"><div class="text-xs font-bold text-rose-800">🔴 กลุ่มใกล้ชิด</div><div id="risk-card-red" class="text-3xl font-extrabold text-rose-700 mt-1">0</div><div class="text-xs text-rose-500">ต้องติดตามทันที</div></div>
+        <div class="p-4 rounded-2xl" style="background:#fefce8"><div class="text-xs font-bold text-amber-800">🟡 กลุ่มห่วงใย / ไม่มีข้อมูล</div><div id="risk-card-yellow" class="text-3xl font-extrabold text-amber-700 mt-1">0</div><div class="text-xs text-amber-500">ควรตรวจสอบเพิ่มเติม</div></div>
+        <div class="p-4 rounded-2xl" style="background:#f0fdf4"><div class="text-xs font-bold text-emerald-800">🟢 กลุ่มไว้ใจ</div><div id="risk-card-green" class="text-3xl font-extrabold text-emerald-700 mt-1">0</div><div class="text-xs text-emerald-500">ทำได้ดี</div></div>
+        <div class="p-4 rounded-2xl" style="background:#eff6ff"><div class="text-xs font-bold text-blue-800">⭐ คะแนนเฉลี่ย</div><div id="risk-card-avg" class="text-3xl font-extrabold text-blue-700 mt-1">—</div><div id="risk-card-total" class="text-xs text-blue-500">จาก 0 คน</div></div>
+      </div>
+    </div>
+
+    <div class="app-card p-5 mb-5">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div class="bg-gray-50 p-4 rounded-2xl h-80"><canvas id="risk-pie-chart" aria-label="สัดส่วนกลุ่มความเสี่ยง"></canvas></div>
+        <div class="bg-gray-50 p-4 rounded-2xl h-80"><canvas id="risk-bar-chart" aria-label="แนวโน้มกลุ่มความเสี่ยง"></canvas></div>
+      </div>
+    </div>
+
+    <div class="app-card p-5 mb-5">
+      <div class="flex justify-between items-center mb-3 flex-wrap gap-2">
+        <h3 class="text-lg font-bold text-gray-800">📊 คะแนนรายวัน</h3>
+        <div class="flex gap-2 text-xs flex-wrap">
+          <span class="px-2 py-1 bg-rose-100 text-rose-700 rounded">🔴 &lt; 60%</span>
+          <span class="px-2 py-1 bg-amber-100 text-amber-700 rounded">🟡 60–84%</span>
+          <span class="px-2 py-1 bg-emerald-100 text-emerald-700 rounded">🟢 ≥ 85%</span>
+          <span class="px-2 py-1 bg-gray-100 text-gray-500 rounded">⚪ ไม่มีข้อมูล</span>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="min-w-full"><thead id="risk-grid-thead"></thead><tbody id="risk-grid-tbody"></tbody></table>
+      </div>
+    </div>
+
+    <div id="risk-list-red-container" class="app-card p-5 mb-5">
+      <h3 class="text-lg font-bold text-rose-700 mb-3">🔴 กลุ่มใกล้ชิด (ต้องติดตามทันที)</h3>
+      <div class="table-responsive"><table class="min-w-full"><thead><tr class="bg-rose-700 text-white"><th class="p-3 text-center">ห้อง</th><th class="p-3 text-left">ชื่อ-สกุล</th><th class="p-3 text-center">เข้าแถว</th><th class="p-3 text-center">เขตพื้นที่</th><th class="p-3 text-center">เข้าเรียน</th><th class="p-3 text-center">Composite</th><th class="p-3 text-center">Streak</th><th class="p-3 text-center">ดู</th></tr></thead><tbody id="risk-list-red"></tbody></table></div>
+    </div>
+    <div id="risk-list-yellow-container" class="app-card p-5 mb-5">
+      <h3 class="text-lg font-bold text-amber-700 mb-3">🟡 กลุ่มห่วงใย / ไม่มีข้อมูล</h3>
+      <div class="table-responsive"><table class="min-w-full"><thead><tr class="bg-amber-700 text-white"><th class="p-3 text-center">ห้อง</th><th class="p-3 text-left">ชื่อ-สกุล</th><th class="p-3 text-center">เข้าแถว</th><th class="p-3 text-center">เขตพื้นที่</th><th class="p-3 text-center">เข้าเรียน</th><th class="p-3 text-center">Composite</th><th class="p-3 text-center">Streak</th><th class="p-3 text-center">ดู</th></tr></thead><tbody id="risk-list-yellow"></tbody></table></div>
+    </div>
+    <div id="risk-list-green-container" class="app-card p-5">
+      <h3 class="text-lg font-bold text-emerald-700 mb-3">🟢 กลุ่มไว้ใจ (ทำได้ดี)</h3>
+      <div class="table-responsive"><table class="min-w-full"><thead><tr class="bg-emerald-700 text-white"><th class="p-3 text-center">ห้อง</th><th class="p-3 text-left">ชื่อ-สกุล</th><th class="p-3 text-center">เข้าแถว</th><th class="p-3 text-center">เขตพื้นที่</th><th class="p-3 text-center">เข้าเรียน</th><th class="p-3 text-center">Composite</th><th class="p-3 text-center">Streak</th><th class="p-3 text-center">ดู</th></tr></thead><tbody id="risk-list-green"></tbody></table></div>
+    </div>
+  </div>
+</div>
+
+<div id="risk-settings-modal" class="fixed inset-0 z-50 items-center justify-center bg-black/50 backdrop-blur-sm p-4" style="display:none">
+  <div class="app-card w-full max-w-md bg-white rounded-3xl overflow-hidden">
+    <div class="flex justify-between items-center p-5 bg-gradient-to-r from-slate-800 to-slate-900 text-white"><h2 class="text-lg font-bold">⚙️ ตั้งค่าน้ำหนักการประเมิน</h2><button type="button" data-risk-close="risk-settings-modal" class="text-2xl">×</button></div>
+    <div class="p-5"><p class="text-sm text-gray-500 mb-4">ระบบจะปรับสัดส่วนตามกิจกรรมที่มีข้อมูล</p><div class="space-y-4">
+      <div><label for="risk-w-att" class="block text-sm font-bold mb-1">📝 เข้าแถว</label><input type="number" id="risk-w-att" class="w-full" min="0" max="100" value="40"></div>
+      <div><label for="risk-w-cln" class="block text-sm font-bold mb-1">🧹 เขตพื้นที่</label><input type="number" id="risk-w-cln" class="w-full" min="0" max="100" value="30"></div>
+      <div><label for="risk-w-subj" class="block text-sm font-bold mb-1">📚 เข้าเรียน</label><input type="number" id="risk-w-subj" class="w-full" min="0" max="100" value="30"></div>
+    </div></div>
+    <div class="p-5 flex gap-3"><button type="button" data-risk-close="risk-settings-modal" class="flex-1 py-3 bg-gray-100 rounded-2xl font-bold">ยกเลิก</button><button id="risk-settings-save" type="button" class="flex-1 py-3 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-2xl font-bold">บันทึก</button></div>
+  </div>
+</div>
+
+<div id="risk-detail-modal" class="fixed inset-0 z-50 items-center justify-center bg-black/50 backdrop-blur-sm p-4" style="display:none">
+  <div class="app-card w-full max-w-3xl max-h-[90vh] flex flex-col bg-white rounded-3xl overflow-hidden">
+    <div class="flex justify-between items-center p-5 bg-gradient-to-r from-blue-800 to-indigo-900 text-white"><div><h2 id="risk-detail-title" class="text-lg font-bold"></h2><p id="risk-detail-sub" class="text-xs text-blue-200"></p></div><button type="button" data-risk-close="risk-detail-modal" class="text-2xl font-bold">×</button></div>
+    <div class="p-4 overflow-y-auto flex-grow"><div id="risk-detail-breakdown" class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4"></div><div class="table-responsive"><table class="min-w-full"><thead><tr class="bg-slate-800 text-white"><th class="p-3 text-left">วันที่</th><th class="p-3 text-left">เข้าแถว</th><th class="p-3 text-left">เขตพื้นที่</th><th class="p-3 text-left">เข้าเรียน</th><th class="p-3 text-center">คะแนนวัน</th></tr></thead><tbody id="risk-detail-tbody"></tbody></table></div></div>
+  </div>
+</div>
+
+<div id="risk-daily-modal" class="fixed inset-0 z-50 items-center justify-center bg-black/50 backdrop-blur-sm p-4" style="display:none">
+  <div class="app-card w-full max-w-md bg-white rounded-3xl overflow-hidden"><div class="flex justify-between items-center p-5 bg-gradient-to-r from-slate-700 to-slate-900 text-white"><div><h2 id="risk-daily-title" class="text-lg font-bold"></h2><p id="risk-daily-sub" class="text-xs text-slate-300"></p></div><button type="button" data-risk-close="risk-daily-modal" class="text-2xl">×</button></div><div class="p-5 space-y-2" id="risk-daily-breakdown"></div></div>
 </div>
 
   </div>

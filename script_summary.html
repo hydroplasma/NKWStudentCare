@@ -1755,4 +1755,438 @@ function handleWeeklyCellClick(date, rowId, mode, metaJson) {
   }
 }
 
+
+// ========================================
+// PHASE 3.5: Risk Assessment UI
+// ========================================
+let riskState = {
+  mode: 'week',
+  startDate: null,
+  endDate: null,
+  classroomFilter: '',
+  weights: { attendance: 40, cleaning: 30, subject: 30 },
+  lastData: null,
+  requestId: 0
+};
+
+function resetRiskAssessmentState() {
+  riskState.mode = 'week';
+  riskState.startDate = null;
+  riskState.endDate = null;
+  riskState.classroomFilter = '';
+  riskState.weights = { attendance: 40, cleaning: 30, subject: 30 };
+  riskState.lastData = null;
+  riskState.requestId++;
+  $('#risk-classroom').removeData('risk-loaded').empty().append($('<option>').val('').text('ทุกห้อง'));
+  $('#risk-content').addClass('hidden');
+  $('#risk-empty').removeClass('hidden').text('เลือกช่วงวันที่แล้วกดประเมิน');
+  $('#risk-settings-modal, #risk-detail-modal, #risk-daily-modal').hide();
+  if (window.riskPieChart) { window.riskPieChart.destroy(); window.riskPieChart = null; }
+  if (window.riskBarChart) { window.riskBarChart.destroy(); window.riskBarChart = null; }
+}
+
+async function initRiskAssessment() {
+  if (!riskState.startDate) setRiskPeriod(TODAY);
+  $('#risk-view-mode').val(riskState.mode);
+  $('#risk-view-mode').off('change.risk').on('change.risk', function() {
+    riskState.mode = $(this).val();
+    setRiskPeriod(riskState.startDate || TODAY);
+    loadRiskAssessment();
+  });
+  $('#risk-prev').off('click.risk').on('click.risk', function() { shiftRiskPeriod(-1); });
+  $('#risk-next').off('click.risk').on('click.risk', function() { shiftRiskPeriod(1); });
+  $('#risk-run').off('click.risk').on('click.risk', loadRiskAssessment);
+  $('#risk-classroom').off('change.risk').on('change.risk', function() {
+    riskState.classroomFilter = String($(this).val() || '');
+    loadRiskAssessment();
+  });
+  $('#risk-settings-btn').off('click.risk').on('click.risk', function() {
+    $('#risk-w-att').val(riskState.weights.attendance);
+    $('#risk-w-cln').val(riskState.weights.cleaning);
+    $('#risk-w-subj').val(riskState.weights.subject);
+    $('#risk-settings-modal').css('display', 'flex');
+  });
+  $('[data-risk-close]').off('click.risk').on('click.risk', function() {
+    $('#' + $(this).attr('data-risk-close')).hide();
+  });
+  $('#risk-settings-save').off('click.risk').on('click.risk', saveRiskWeightSettings);
+
+  try {
+    await Promise.all([loadRiskClassrooms(), loadRiskWeightSettings()]);
+    if (riskState.lastData) renderRiskAssessment(riskState.lastData);
+    else await loadRiskAssessment();
+  } catch (error) {
+    console.error('Risk assessment initialization error:', error);
+    $('#risk-content').addClass('hidden');
+    $('#risk-empty').removeClass('hidden').text(`เริ่มต้นหน้าประเมินไม่สำเร็จ: ${error.message || 'เกิดข้อผิดพลาด'}`);
+    $.LoadingOverlay('hide');
+    Swal.fire('ผิดพลาด', error.message || 'เริ่มต้นหน้าประเมินความเสี่ยงไม่สำเร็จ', 'error');
+  }
+}
+
+async function loadRiskClassrooms() {
+  const select = $('#risk-classroom');
+  if (select.data('risk-loaded')) return;
+  let rooms = Array.isArray(ALL_CLASSROOMS) ? ALL_CLASSROOMS.slice() : [];
+  if (!rooms.length) {
+    const response = await runGoogleScript('getClassrooms', []);
+    if (response.status !== 'success') throw new Error(response.message || 'โหลดรายชื่อห้องไม่สำเร็จ');
+    rooms = response.data || [];
+    if (typeof ALL_CLASSROOMS !== 'undefined') ALL_CLASSROOMS = rooms;
+  }
+  select.empty().append($('<option>').val('').text('ทุกห้อง'));
+  rooms.forEach(function(room) {
+    select.append($('<option>').val(room.id).text(room.name || room.id));
+  });
+  select.val(riskState.classroomFilter);
+  select.data('risk-loaded', true);
+}
+
+async function loadRiskWeightSettings() {
+  const response = await runGoogleScript('getRiskWeights');
+  if (response.status === 'success' && response.data) {
+    riskState.weights = {
+      attendance: Number(response.data.attendance),
+      cleaning: Number(response.data.cleaning),
+      subject: Number(response.data.subject)
+    };
+    updateRiskWeightsDisplay();
+  }
+}
+
+async function saveRiskWeightSettings() {
+  const weights = {
+    attendance: Number($('#risk-w-att').val()),
+    cleaning: Number($('#risk-w-cln').val()),
+    subject: Number($('#risk-w-subj').val())
+  };
+  if (Object.keys(weights).some(function(key) { return !Number.isFinite(weights[key]) || weights[key] < 0 || weights[key] > 100; }) ||
+      weights.attendance + weights.cleaning + weights.subject <= 0) {
+    Swal.fire('แจ้งเตือน', 'น้ำหนักแต่ละกิจกรรมต้องอยู่ระหว่าง 0 ถึง 100 และผลรวมต้องมากกว่า 0', 'warning');
+    return;
+  }
+  $.LoadingOverlay('show', { text: 'กำลังบันทึกน้ำหนัก...' });
+  try {
+    const response = await runGoogleScript('saveRiskWeights', JSON.stringify(weights));
+    if (response.status !== 'success') throw new Error(response.message || 'บันทึกน้ำหนักไม่สำเร็จ');
+    riskState.weights = weights;
+    updateRiskWeightsDisplay();
+    $('#risk-settings-modal').hide();
+    await loadRiskAssessment();
+    Swal.fire({ icon: 'success', title: 'บันทึกแล้ว', timer: 1200, showConfirmButton: false });
+  } catch (error) {
+    Swal.fire('ผิดพลาด', error.message, 'error');
+  } finally {
+    $.LoadingOverlay('hide');
+  }
+}
+
+function updateRiskWeightsDisplay() {
+  const w = riskState.weights;
+  $('#risk-weights-display').text(`เข้าแถว ${w.attendance}% | เขตพื้นที่ ${w.cleaning}% | เข้าเรียน ${w.subject}%`);
+}
+
+function riskFormatISO(date) {
+  return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
+}
+
+function setRiskPeriod(baseDateStr) {
+  const parts = String(baseDateStr || TODAY).split('-').map(Number);
+  const d = new Date(parts[0], parts[1] - 1, parts[2]);
+  let start;
+  let end;
+  if (riskState.mode === 'week') {
+    const day = d.getDay();
+    start = new Date(d);
+    start.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
+    end = new Date(start);
+    end.setDate(start.getDate() + 4);
+  } else {
+    start = new Date(d.getFullYear(), d.getMonth(), 1);
+    end = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+  }
+  riskState.startDate = riskFormatISO(start);
+  riskState.endDate = riskFormatISO(end);
+  const thaiDate = function(dateStr) {
+    const p = dateStr.split('-');
+    return `${Number(p[2])}/${Number(p[1])}/${Number(p[0]) + 543}`;
+  };
+  const prefix = riskState.mode === 'week' ? 'สัปดาห์' : 'เดือน';
+  $('#risk-date-display').val(`${prefix}: ${thaiDate(riskState.startDate)} - ${thaiDate(riskState.endDate)}`);
+}
+
+function shiftRiskPeriod(direction) {
+  const parts = riskState.startDate.split('-').map(Number);
+  const date = new Date(parts[0], parts[1] - 1, parts[2]);
+  if (riskState.mode === 'week') date.setDate(date.getDate() + direction * 7);
+  else date.setMonth(date.getMonth() + direction);
+  setRiskPeriod(riskFormatISO(date));
+  loadRiskAssessment();
+}
+
+async function loadRiskAssessment() {
+  if (!riskState.startDate || !riskState.endDate) return;
+  const requestId = ++riskState.requestId;
+  riskState.lastData = null;
+  $('#risk-content').addClass('hidden');
+  $('#risk-empty').removeClass('hidden').text('กำลังประเมิน...');
+  $.LoadingOverlay('show', { text: 'กำลังประเมิน...' });
+  try {
+    const response = await runGoogleScript(
+      'getStudentRiskAssessment', riskState.startDate, riskState.endDate,
+      riskState.classroomFilter || '', JSON.stringify(riskState.weights)
+    );
+    if (requestId !== riskState.requestId) return;
+    if (response.status !== 'success') throw new Error(response.message || 'ประเมินไม่สำเร็จ');
+    riskState.lastData = response.data;
+    renderRiskAssessment(response.data);
+    $('#risk-empty').addClass('hidden');
+    $('#risk-content').removeClass('hidden');
+  } catch (error) {
+    if (requestId === riskState.requestId) {
+      console.error('Risk assessment error:', error);
+      riskState.lastData = null;
+      $('#risk-content').addClass('hidden');
+      $('#risk-empty').removeClass('hidden').text(`โหลดผลประเมินไม่สำเร็จ: ${error.message || 'เกิดข้อผิดพลาด'}`);
+      Swal.fire('ผิดพลาด', error.message || 'โหลดผลประเมินไม่สำเร็จ', 'error');
+    }
+  } finally {
+    if (requestId === riskState.requestId) $.LoadingOverlay('hide');
+  }
+}
+
+function riskEscapeHtml(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, function(char) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char];
+  });
+}
+
+function riskCategoryLabel(category) {
+  return category === 'red' ? '🔴 ใกล้ชิด' : category === 'yellow' ? '🟡 ห่วงใย' : '🟢 ไว้ใจ';
+}
+
+function renderRiskAssessment(data) {
+  if (!data || typeof data !== 'object' || !data.summary || !data.period) throw new Error('รูปแบบข้อมูลประเมินไม่ถูกต้อง');
+  const summary = Object.assign({ red: 0, yellow: 0, green: 0, avgScore: 0, totalStudents: 0, scoredStudents: 0 }, data.summary);
+  const students = (Array.isArray(data.students) ? data.students : []).filter(function(student) { return student && typeof student === 'object'; }).map(function(student) {
+    const composite = student.composite === null || student.composite === undefined ? null : Number(student.composite);
+    return Object.assign({}, student, {
+      composite: Number.isFinite(composite) ? composite : null,
+      category: ['red', 'yellow', 'green'].includes(student.category) ? student.category : 'yellow',
+      breakdown: Object.assign({ attendance: null, cleaning: null, subject: null }, student.breakdown || {}),
+      dailyScores: student.dailyScores && typeof student.dailyScores === 'object' ? student.dailyScores : {}
+    });
+  });
+  const dates = Array.isArray(data.period.dates) ? data.period.dates : [];
+  $('#risk-card-red').text(summary.red || 0);
+  $('#risk-card-yellow').text(summary.yellow || 0);
+  $('#risk-card-green').text(summary.green || 0);
+  $('#risk-card-avg').text(summary.scoredStudents ? `${summary.avgScore}%` : '—');
+  $('#risk-card-total').text(`จาก ${summary.totalStudents || 0} คน (${summary.scoredStudents || 0} คนมีข้อมูล)`);
+  renderRiskCharts(summary, students, dates);
+  renderRiskGrid(students, dates);
+  renderRiskList('red', students.filter(function(student) { return student.category === 'red'; }));
+  renderRiskList('yellow', students.filter(function(student) { return student.category === 'yellow'; }));
+  renderRiskList('green', students.filter(function(student) { return student.category === 'green'; }));
+}
+
+function riskWeekStart(dateStr) {
+  const p = dateStr.split('-').map(Number);
+  const date = new Date(p[0], p[1] - 1, p[2]);
+  const day = date.getDay();
+  date.setDate(date.getDate() - (day === 0 ? 6 : day - 1));
+  return riskFormatISO(date);
+}
+
+function renderRiskCharts(summary, students, dates) {
+  const pieCanvas = document.getElementById('risk-pie-chart');
+  if (pieCanvas && typeof Chart !== 'undefined') {
+    if (window.riskPieChart) window.riskPieChart.destroy();
+    window.riskPieChart = new Chart(pieCanvas.getContext('2d'), {
+      type: 'pie',
+      data: {
+        labels: ['🔴 ใกล้ชิด', '🟡 ห่วงใย / ไม่มีข้อมูล', '🟢 ไว้ใจ'],
+        datasets: [{ data: [summary.red || 0, summary.yellow || 0, summary.green || 0], backgroundColor: ['#ef4444', '#eab308', '#10b981'] }]
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' }, title: { display: true, text: 'สัดส่วนกลุ่มความเสี่ยง' } } }
+    });
+  }
+
+  const weeks = {};
+  (dates || []).forEach(function(date) {
+    const key = riskWeekStart(date);
+    if (!weeks[key]) weeks[key] = [];
+    weeks[key].push(date);
+  });
+  const labels = Object.keys(weeks).sort().map(function(start) {
+    const p = start.split('-');
+    return `สัปดาห์ ${Number(p[2])}/${Number(p[1])}`;
+  });
+  const counts = { red: [], yellow: [], green: [] };
+  Object.keys(weeks).sort().forEach(function(weekStart) {
+    const weekDates = weeks[weekStart];
+    const count = { red: 0, yellow: 0, green: 0 };
+    students.forEach(function(student) {
+      const values = weekDates.map(function(date) {
+        const day = student.dailyScores && student.dailyScores[date];
+        return day && Number.isFinite(Number(day.score)) ? Number(day.score) : null;
+      }).filter(function(value) { return value !== null; });
+      if (!values.length) return;
+      const average = values.reduce(function(sum, value) { return sum + value; }, 0) / values.length;
+      const category = average >= 85 ? 'green' : average >= 60 ? 'yellow' : 'red';
+      count[category]++;
+    });
+    ['red', 'yellow', 'green'].forEach(function(category) { counts[category].push(count[category]); });
+  });
+  const barCanvas = document.getElementById('risk-bar-chart');
+  if (barCanvas && typeof Chart !== 'undefined') {
+    if (window.riskBarChart) window.riskBarChart.destroy();
+    window.riskBarChart = new Chart(barCanvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [
+          { label: '🔴 ใกล้ชิด', data: counts.red, backgroundColor: '#ef4444' },
+          { label: '🟡 ห่วงใย', data: counts.yellow, backgroundColor: '#eab308' },
+          { label: '🟢 ไว้ใจ', data: counts.green, backgroundColor: '#10b981' }
+        ]
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' }, title: { display: true, text: 'แนวโน้มรายสัปดาห์ (ค่าเฉลี่ยรายวัน)' } }, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } } }
+    });
+  }
+}
+
+function renderRiskGrid(students, dates) {
+  const dayNames = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
+  let header = '<tr class="bg-slate-800 text-white"><th class="p-2 text-left">ชื่อ-สกุล</th><th class="p-2 text-center">ห้อง</th>';
+  dates.forEach(function(date) {
+    const p = date.split('-').map(Number);
+    const day = new Date(p[0], p[1] - 1, p[2]).getDay();
+    header += `<th class="p-2 text-center text-xs">${dayNames[day]}<br><span class="opacity-75">${p[2]}/${p[1]}</span></th>`;
+  });
+  header += '<th class="p-2 text-center">รวม</th><th class="p-2 text-center">กลุ่ม</th></tr>';
+  $('#risk-grid-thead').html(header);
+  const tbody = $('#risk-grid-tbody').empty();
+  if (!students.length) {
+    tbody.append(`<tr><td colspan="${dates.length + 4}" class="text-center p-6 text-gray-400">ไม่มีรายชื่อนักเรียนในช่วงที่เลือก</td></tr>`);
+    return;
+  }
+  students.forEach(function(student) {
+    let row = `<tr class="border-b border-gray-100 hover:bg-blue-50"><td class="p-2 text-gray-800 text-sm font-medium">${riskEscapeHtml(student.name)}</td><td class="p-2 text-center text-gray-600 text-xs">${riskEscapeHtml(student.classroom_name)}</td>`;
+    dates.forEach(function(date) {
+      const day = student.dailyScores && student.dailyScores[date];
+      if (!day) row += '<td class="p-2 text-center text-gray-300 text-xs">⚪</td>';
+      else {
+        const color = day.category === 'green' ? 'background:#dcfce7;color:#166534' : day.category === 'yellow' ? 'background:#fef3c7;color:#92400e' : 'background:#fee2e2;color:#991b1b';
+        row += `<td class="p-1 text-center text-xs"><button type="button" class="risk-daily-button rounded px-2 py-1 font-bold" style="${color}" data-student-id="${riskEscapeHtml(student.id)}" data-classroom-id="${riskEscapeHtml(student.classroom_id)}" data-risk-date="${date}" title="คะแนน ${day.score}%">${day.score}%</button></td>`;
+      }
+    });
+    const composite = student.composite === null ? '—' : `${student.composite}%`;
+    row += `<td class="p-2 text-center font-bold text-gray-800">${composite}</td><td class="p-2 text-center"><span class="px-2 py-1 rounded-lg text-xs font-bold">${riskCategoryLabel(student.category)}</span></td></tr>`;
+    tbody.append(row);
+  });
+  tbody.off('click.risk', '.risk-daily-button').on('click.risk', '.risk-daily-button', function() {
+    showRiskDaily($(this).attr('data-student-id'), $(this).attr('data-classroom-id'), $(this).attr('data-risk-date'));
+  });
+}
+
+function renderRiskList(category, students) {
+  const tbody = $(`#risk-list-${category}`).empty();
+  const container = $(`#risk-list-${category}-container`);
+  if (!students.length) { container.hide(); return; }
+  container.show();
+  students.forEach(function(student) {
+    const pct = function(item) {
+      if (!item) return '<span class="text-gray-300">—</span>';
+      const color = item.score >= 85 ? 'text-emerald-600' : item.score >= 60 ? 'text-amber-600' : 'text-rose-600';
+      return `<span class="font-bold ${color}">${item.score}%</span>`;
+    };
+    tbody.append(`<tr class="border-b border-gray-100 hover:bg-blue-50"><td class="p-3 text-center text-gray-600 text-sm">${riskEscapeHtml(student.classroom_name)}</td><td class="p-3 text-gray-800 font-medium">${riskEscapeHtml(student.name)}</td><td class="p-3 text-center">${pct(student.breakdown.attendance)}</td><td class="p-3 text-center">${pct(student.breakdown.cleaning)}</td><td class="p-3 text-center">${pct(student.breakdown.subject)}</td><td class="p-3 text-center font-bold text-lg">${student.composite === null ? '—' : `${student.composite}%`}</td><td class="p-3 text-center">${student.streak > 0 ? `${student.streak} วัน` : '—'}</td><td class="p-3 text-center"><button type="button" class="risk-student-detail px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-bold" data-student-id="${riskEscapeHtml(student.id)}" data-classroom-id="${riskEscapeHtml(student.classroom_id)}">👁️</button></td></tr>`);
+  });
+  tbody.off('click.risk', '.risk-student-detail').on('click.risk', '.risk-student-detail', function() {
+    showRiskDetail($(this).attr('data-student-id'), $(this).attr('data-classroom-id'));
+  });
+}
+
+function riskEventsText(events, kind) {
+  if (!events || !events.length) return 'ไม่มีข้อมูล';
+  return events.map(function(event) {
+    let label = event.status || '';
+    if (kind === 'attendance' && event.period) label += ` (${event.period})`;
+    if (kind === 'subject' && event.subject) label += ` [${event.subject}]`;
+    return riskEscapeHtml(label);
+  }).join('<br>');
+}
+
+function riskBreakdownCard(icon, label, data, color) {
+  if (!data) return `<div class="p-3 rounded-xl bg-gray-100"><div class="text-xs font-bold text-gray-500">${icon} ${label}</div><div class="text-lg font-extrabold text-gray-400 mt-1">ไม่มีข้อมูล</div></div>`;
+  return `<div class="p-3 rounded-xl" style="background:${color.bg}"><div class="text-xs font-bold" style="color:${color.text}">${icon} ${label}</div><div class="text-2xl font-extrabold mt-1" style="color:${color.text}">${data.score}%</div><div class="text-xs mt-1" style="color:${color.text}">${data.points} / ${data.total} ครั้ง</div></div>`;
+}
+
+async function riskFetchStudentDetail(studentId, classroomId) {
+  const response = await runGoogleScript('getStudentRiskDetail', studentId, riskState.startDate, riskState.endDate, classroomId || '', JSON.stringify(riskState.weights));
+  if (response.status !== 'success') throw new Error(response.message || 'โหลดรายละเอียดไม่สำเร็จ');
+  const data = response.data;
+  if (!data || !data.student || !Array.isArray(data.days)) throw new Error('รูปแบบข้อมูลรายละเอียดไม่ถูกต้อง');
+  const student = Object.assign({}, data.student, { breakdown: Object.assign({ attendance: null, cleaning: null, subject: null }, data.student.breakdown || {}) });
+  const days = data.days.filter(function(day) { return day && typeof day === 'object'; }).map(function(day) {
+    return Object.assign({}, day, {
+      attendance: Array.isArray(day.attendance) ? day.attendance : [],
+      cleaning: Array.isArray(day.cleaning) ? day.cleaning : [],
+      subject: Array.isArray(day.subject) ? day.subject : []
+    });
+  });
+  return Object.assign({}, data, { student: student, days: days });
+}
+
+async function showRiskDetail(studentId, classroomId) {
+  $('#risk-detail-title').text('กำลังโหลดรายละเอียด...');
+  $('#risk-detail-sub').text('');
+  $('#risk-detail-modal').css('display', 'flex');
+  $('#risk-detail-tbody').html('<tr><td colspan="5" class="text-center p-5 text-gray-400">กำลังโหลด...</td></tr>');
+  try {
+    const data = await riskFetchStudentDetail(studentId, classroomId);
+    const student = data.student;
+    $('#risk-detail-title').text(`👁️ ${student.name}`);
+    $('#risk-detail-sub').text(`ห้อง ${student.classroom_name} | Composite ${student.composite === null ? '—' : `${student.composite}%`} | ${riskCategoryLabel(student.category)}`);
+    $('#risk-detail-breakdown').html(
+      riskBreakdownCard('📝', 'เข้าแถว', student.breakdown.attendance, { bg: '#dcfce7', text: '#166534' }) +
+      riskBreakdownCard('🧹', 'เขตพื้นที่', student.breakdown.cleaning, { bg: '#dbeafe', text: '#1e40af' }) +
+      riskBreakdownCard('📚', 'เข้าเรียน', student.breakdown.subject, { bg: '#f3e8ff', text: '#6b21a8' })
+    );
+    const tbody = $('#risk-detail-tbody').empty();
+    data.days.forEach(function(day) {
+      const hasEvents = day.attendance.length || day.cleaning.length || day.subject.length;
+      if (!hasEvents) return;
+      const scoreText = day.score === null ? 'ไม่มีข้อมูล' : `${day.score}% ${riskCategoryLabel(day.category)}`;
+      tbody.append(`<tr class="border-b border-gray-100"><td class="p-3 text-gray-700 text-sm">${riskEscapeHtml(day.date)}</td><td class="p-3 text-sm">${riskEventsText(day.attendance, 'attendance')}</td><td class="p-3 text-sm">${riskEventsText(day.cleaning, 'cleaning')}</td><td class="p-3 text-sm">${riskEventsText(day.subject, 'subject')}</td><td class="p-3 text-center text-xs">${riskEscapeHtml(scoreText)}</td></tr>`);
+    });
+    if (!tbody.children().length) tbody.append('<tr><td colspan="5" class="text-center p-5 text-gray-400">ไม่มีข้อมูลในช่วงวันที่นี้</td></tr>');
+  } catch (error) {
+    $('#risk-detail-tbody').html(`<tr><td colspan="5" class="text-center p-5 text-rose-600">${riskEscapeHtml(error.message)}</td></tr>`);
+  }
+}
+
+async function showRiskDaily(studentId, classroomId, date) {
+  $('#risk-daily-title').text(`📅 ${date}`);
+  $('#risk-daily-sub').text('กำลังโหลดรายละเอียด...');
+  $('#risk-daily-breakdown').html('<div class="text-center text-gray-400">กำลังโหลด...</div>');
+  $('#risk-daily-modal').css('display', 'flex');
+  try {
+    const data = await riskFetchStudentDetail(studentId, classroomId);
+    const student = data.student;
+    const day = data.days.find(function(item) { return item.date === date; });
+    if (!day) throw new Error('ไม่พบข้อมูลวันที่เลือก');
+    $('#risk-daily-sub').text(student.name);
+    const statusLine = function(title, events, kind) {
+      return `<div class="flex justify-between gap-3 items-start p-3 bg-gray-50 rounded-xl"><span class="font-bold shrink-0">${title}</span><span class="text-right text-sm">${riskEventsText(events, kind)}</span></div>`;
+    };
+    let html = statusLine('📝 เข้าแถว', day.attendance, 'attendance') + statusLine('🧹 เขตพื้นที่', day.cleaning, 'cleaning') + statusLine('📚 เข้าเรียน', day.subject, 'subject');
+    html += `<div class="p-3 rounded-xl mt-2 text-center ${day.category === 'red' ? 'bg-rose-100 text-rose-800' : day.category === 'yellow' ? 'bg-amber-100 text-amber-800' : day.category === 'green' ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-700'}"><div class="text-xs font-bold">คะแนนรวมวันนี้</div><div class="text-3xl font-extrabold">${day.score === null ? 'ไม่มีข้อมูล' : `${day.score}%`}</div></div>`;
+    $('#risk-daily-breakdown').html(html);
+  } catch (error) {
+    $('#risk-daily-sub').text('');
+    $('#risk-daily-breakdown').html(`<div class="text-center text-rose-600">${riskEscapeHtml(error.message)}</div>`);
+  }
+}
 </script>

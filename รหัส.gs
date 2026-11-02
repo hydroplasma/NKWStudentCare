@@ -2313,3 +2313,471 @@ function diagnoseSubjectAttendance() {
   Logger.log(out.join('\n'));
   return out.join('\n');
 }
+
+
+// TODO(Security): Require verified approved-account identity on these server APIs before deployment.
+// The current USER_DEPLOYING / ANYONE_ANONYMOUS setup may not expose the active user's email;
+// client-side filters are not an authorization boundary.
+// ========================================
+// PHASE 3.5: Student Risk Assessment
+// ========================================
+const RISK_WEIGHT_KEYS = {
+  ATTENDANCE: 'riskWeight_attendance',
+  CLEANING: 'riskWeight_cleaning',
+  SUBJECT: 'riskWeight_subject'
+};
+const RISK_DEFAULT_WEIGHTS = { attendance: 40, cleaning: 30, subject: 30 };
+
+function riskNormalizeWeights(value) {
+  let input = value || {};
+  if (typeof input === 'string') input = JSON.parse(input);
+  const weights = {};
+  ['attendance', 'cleaning', 'subject'].forEach(function(key) {
+    const n = Number(input[key]);
+    weights[key] = Number.isFinite(n) && n >= 0 && n <= 100 ? n : RISK_DEFAULT_WEIGHTS[key];
+  });
+  if (weights.attendance + weights.cleaning + weights.subject <= 0) {
+    return Object.assign({}, RISK_DEFAULT_WEIGHTS);
+  }
+  return weights;
+}
+
+function riskValidateWeightInput(value) {
+  let input = value;
+  if (typeof input === 'string') input = JSON.parse(input);
+  if (!input || typeof input !== 'object') throw new Error('ข้อมูลน้ำหนักไม่ถูกต้อง');
+  const weights = {};
+  ['attendance', 'cleaning', 'subject'].forEach(function(key) {
+    const n = Number(input[key]);
+    if (!Number.isFinite(n) || n < 0 || n > 100) throw new Error('น้ำหนักแต่ละกิจกรรมต้องอยู่ระหว่าง 0 ถึง 100');
+    weights[key] = n;
+  });
+  if (weights.attendance + weights.cleaning + weights.subject <= 0) throw new Error('ผลรวมต้องมากกว่า 0');
+  return weights;
+}
+
+function getRiskWeights() {
+  try {
+    const weights = Object.assign({}, RISK_DEFAULT_WEIGHTS);
+    const sheet = getOrCreateSheet(SHEET_NAMES.CONFIG);
+    const data = sheet.getDataRange().getValues();
+    data.slice(1).forEach(function(row) {
+      const key = String(row[0] || '').trim();
+      const value = Number(row[1]);
+      if (!Number.isFinite(value) || value < 0 || value > 100) return;
+      if (key === RISK_WEIGHT_KEYS.ATTENDANCE) weights.attendance = value;
+      if (key === RISK_WEIGHT_KEYS.CLEANING) weights.cleaning = value;
+      if (key === RISK_WEIGHT_KEYS.SUBJECT) weights.subject = value;
+    });
+    return { status: 'success', data: riskNormalizeWeights(weights) };
+  } catch (err) {
+    return { status: 'error', message: err.message || String(err), data: Object.assign({}, RISK_DEFAULT_WEIGHTS) };
+  }
+}
+
+function saveRiskWeights(weightsJson) {
+  let lock;
+  let lockAcquired = false;
+  try {
+    const weights = riskValidateWeightInput(weightsJson);
+    const lockService = LockService.getScriptLock();
+    lock = lockService;
+    if (!lock.tryLock(10000)) return { status: 'error', message: 'Server busy' };
+    lockAcquired = true;
+    const sheet = getOrCreateSheet(SHEET_NAMES.CONFIG);
+    const data = sheet.getDataRange().getValues();
+    const settings = [
+      [RISK_WEIGHT_KEYS.ATTENDANCE, weights.attendance],
+      [RISK_WEIGHT_KEYS.CLEANING, weights.cleaning],
+      [RISK_WEIGHT_KEYS.SUBJECT, weights.subject]
+    ];
+    settings.forEach(function(setting) {
+      let found = false;
+      for (let i = 1; i < data.length; i++) {
+        if (String(data[i][0] || '').trim() === setting[0]) {
+          sheet.getRange(i + 1, 2).setValue(setting[1]);
+          found = true;
+          break;
+        }
+      }
+      if (!found) sheet.appendRow(setting);
+    });
+    return { status: 'success', message: 'บันทึกน้ำหนักสำเร็จ', data: weights };
+  } catch (err) {
+    return { status: 'error', message: err.message || String(err) };
+  } finally {
+    if (lock && lockAcquired) lock.releaseLock();
+  }
+}
+
+function riskGetDateList(startDate, endDate) {
+  const valid = function(value) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const p = value.split('-').map(Number);
+    const d = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
+    return d.getUTCFullYear() === p[0] && d.getUTCMonth() === p[1] - 1 && d.getUTCDate() === p[2];
+  };
+  if (!valid(startDate) || !valid(endDate) || startDate > endDate) {
+    throw new Error('ช่วงวันที่ไม่ถูกต้อง');
+  }
+  const start = startDate.split('-').map(Number);
+  const end = endDate.split('-').map(Number);
+  const cursor = new Date(Date.UTC(start[0], start[1] - 1, start[2]));
+  const finish = new Date(Date.UTC(end[0], end[1] - 1, end[2]));
+  if ((finish.getTime() - cursor.getTime()) / 86400000 > 366) {
+    throw new Error('เลือกช่วงเวลาได้ไม่เกิน 367 วัน');
+  }
+  const dates = [];
+  while (cursor <= finish) {
+    dates.push([cursor.getUTCFullYear(), String(cursor.getUTCMonth() + 1).padStart(2, '0'), String(cursor.getUTCDate()).padStart(2, '0')].join('-'));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return dates;
+}
+
+function riskScoreStatus(kind, status) {
+  const value = String(status || '').trim();
+  if (kind === 'cleaning') {
+    if (value === 'ทำ') return { points: 1, count: 'done' };
+    if (value === 'ลา') return { points: 0.5, count: 'excused' };
+    if (value === 'ไม่ทำ' || value === 'หนีเวร') return { points: 0, count: 'notDone' };
+    return null;
+  }
+  if (value === 'มา') return { points: 1, count: 'present' };
+  if (value === 'สาย') return { points: 0.75, count: 'late' };
+  if (value === 'ลา' || value === 'ป่วย') return { points: 0.5, count: value === 'ลา' ? 'leave' : 'sick' };
+  if (value === 'ขาด') return { points: 0, count: 'absent' };
+  return null;
+}
+
+function riskStudentKey(classroomId, studentId) {
+  return String(classroomId) + '::' + String(studentId);
+}
+
+function riskAddEntry(map, key, date, kind, status, detail) {
+  const scored = riskScoreStatus(kind, status);
+  if (!scored) return;
+  if (!map[key]) map[key] = {};
+  if (!map[key][date]) {
+    map[key][date] = { total: 0, points: 0, counts: {}, events: [] };
+  }
+  const bucket = map[key][date];
+  bucket.total++;
+  bucket.points += scored.points;
+  bucket.counts[scored.count] = (bucket.counts[scored.count] || 0) + 1;
+  const event = Object.assign({ status: String(status || '').trim(), points: scored.points }, detail || {});
+  bucket.events.push(event);
+}
+
+function riskSubjectStudentKey(studentId, grade, room, classroomFilter, byId) {
+  const candidates = (byId[String(studentId)] || []).filter(function(student) {
+    return !classroomFilter || student.classroom_id === classroomFilter;
+  });
+  if (!candidates.length) return '';
+  const gradeRoom = (String(grade || '').trim() + '/' + String(room || '').trim()).trim();
+  const matches = candidates.filter(function(student) {
+    return student.classroom_id === String(room || '').trim() ||
+      student.classroom_id === gradeRoom ||
+      student.classroom_name === gradeRoom ||
+      student.classroom_name === String(room || '').trim();
+  });
+  if (matches.length === 1) return matches[0]._riskKey;
+  return candidates.length === 1 ? candidates[0]._riskKey : '';
+}
+
+function riskCollectDataset(startDate, endDate, classroomFilter) {
+  const dates = riskGetDateList(startDate, endDate);
+  const targetRoom = String(classroomFilter || '').trim();
+  const allStudents = getAllStudents();
+  if (!allStudents || allStudents.status !== 'success') throw new Error('โหลดรายชื่อนักเรียนไม่สำเร็จ');
+  const classroomResponse = getClassrooms([]);
+  const classrooms = classroomResponse && classroomResponse.status === 'success' ? classroomResponse.data || [] : [];
+  const roomNameMap = {};
+  classrooms.forEach(function(room) { roomNameMap[String(room.id)] = String(room.name || room.id); });
+
+  const students = {};
+  const byId = {};
+  Object.keys(allStudents.data || {}).forEach(function(roomId) {
+    const room = String(roomId).trim();
+    if (targetRoom && room !== targetRoom) return;
+    (allStudents.data[roomId] || []).forEach(function(student) {
+      const id = String(student.student_id || '').trim();
+      if (!id) return;
+      const key = riskStudentKey(room, id);
+      if (students[key]) return;
+      const record = {
+        id: id,
+        name: String(student.name || '').trim(),
+        classroom_id: room,
+        classroom_name: roomNameMap[room] || room,
+        _riskKey: key
+      };
+      students[key] = record;
+      if (!byId[id]) byId[id] = [];
+      byId[id].push(record);
+    });
+  });
+
+  const attendance = {};
+  const cleaning = {};
+  const subject = {};
+  const ss = getSpreadsheet();
+  const attendanceSheet = ss.getSheetByName(SHEET_NAMES.ATTENDANCE);
+  if (attendanceSheet) {
+    getCleanedAttendanceRows(attendanceSheet.getDataRange().getValues()).forEach(function(row) {
+      const date = formatDateStr(row[0]);
+      const room = String(row[2] || '').trim();
+      if (!date || date < startDate || date > endDate || (targetRoom && room !== targetRoom)) return;
+      let entries = [];
+      try { entries = JSON.parse(row[4] || '[]'); } catch (err) { return; }
+      entries.forEach(function(entry) {
+        const id = String(entry.student_id || '').trim();
+        const key = riskStudentKey(room, id);
+        if (!students[key]) return;
+        riskAddEntry(attendance, key, date, 'attendance', entry.status, { period: String(row[1] || '').trim() });
+      });
+    });
+  }
+
+  const cleaningSheet = ss.getSheetByName(CLEANING_SHEET_NAMES.ATTENDANCE);
+  if (cleaningSheet) {
+    getCleanedCleaningRows(cleaningSheet.getDataRange().getValues()).forEach(function(row) {
+      const date = formatDateStr(row[0]);
+      const room = String(row[1] || '').trim();
+      if (!date || date < startDate || date > endDate || (targetRoom && room !== targetRoom)) return;
+      let entries = [];
+      try { entries = JSON.parse(row[3] || '[]'); } catch (err) { return; }
+      entries.forEach(function(entry) {
+        const id = String(entry.student_id || '').trim();
+        const key = riskStudentKey(room, id);
+        if (!students[key]) return;
+        riskAddEntry(cleaning, key, date, 'cleaning', entry.status, {});
+      });
+    });
+  }
+
+  const subjectSheet = ss.getSheetByName('Attendance_Subjects');
+  if (subjectSheet) {
+    const data = subjectSheet.getDataRange().getValues();
+    const latest = {};
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const date = formatDateStr(row[1]);
+      if (!date || date < startDate || date > endDate) continue;
+      const id = String(row[7] || '').trim();
+      const grade = String(row[5] || '').trim();
+      const room = String(row[6] || '').trim();
+      const key = riskSubjectStudentKey(id, grade, room, targetRoom, byId);
+      if (!key) continue;
+      const code = String(row[2] || '').trim();
+      const name = String(row[3] || '').trim();
+      const subjectKey = code || name;
+      const uniqueKey = [key, date, subjectKey].join('|');
+      latest[uniqueKey] = { key: key, date: date, status: String(row[9] || '').trim(), subject: name || code, subjectCode: code };
+    }
+    Object.keys(latest).forEach(function(uniqueKey) {
+      const item = latest[uniqueKey];
+      riskAddEntry(subject, item.key, item.date, 'subject', item.status, { subject: item.subject, subjectCode: item.subjectCode });
+    });
+  }
+
+  return { dates: dates, students: students, byId: byId, attendance: attendance, cleaning: cleaning, subject: subject, weights: null };
+}
+
+function riskAggregate(dayMap) {
+  const total = { total: 0, points: 0, counts: {} };
+  Object.keys(dayMap || {}).forEach(function(date) {
+    const day = dayMap[date];
+    total.total += day.total;
+    total.points += day.points;
+    Object.keys(day.counts || {}).forEach(function(key) {
+      total.counts[key] = (total.counts[key] || 0) + day.counts[key];
+    });
+  });
+  return total;
+}
+
+function riskBreakdown(total) {
+  if (!total || total.total <= 0) return null;
+  return {
+    score: Math.round(total.points / total.total * 100),
+    total: total.total,
+    points: Number(total.points.toFixed(2)),
+    present: total.counts.present || 0,
+    absent: total.counts.absent || 0,
+    late: total.counts.late || 0,
+    leave: total.counts.leave || 0,
+    sick: total.counts.sick || 0,
+    done: total.counts.done || 0,
+    notDone: total.counts.notDone || 0,
+    excused: total.counts.excused || 0
+  };
+}
+
+function riskComputeStudent(student, dataset, weights) {
+  const key = student._riskKey;
+  const attDays = dataset.attendance[key] || {};
+  const cleaningDays = dataset.cleaning[key] || {};
+  const subjectDays = dataset.subject[key] || {};
+  const att = riskAggregate(attDays);
+  const cleaning = riskAggregate(cleaningDays);
+  const subject = riskAggregate(subjectDays);
+  const percentages = {
+    attendance: att.total ? att.points / att.total * 100 : null,
+    cleaning: cleaning.total ? cleaning.points / cleaning.total * 100 : null,
+    subject: subject.total ? subject.points / subject.total * 100 : null
+  };
+  let weighted = 0;
+  let availableWeight = 0;
+  ['attendance', 'cleaning', 'subject'].forEach(function(kind) {
+    if (percentages[kind] !== null && weights[kind] > 0) {
+      weighted += percentages[kind] * weights[kind];
+      availableWeight += weights[kind];
+    }
+  });
+  const composite = availableWeight ? Math.round(weighted / availableWeight) : null;
+
+  let currentStreak = 0;
+  let maxStreak = 0;
+  dataset.dates.forEach(function(date) {
+    const day = attDays[date];
+    if (!day) return; // วันที่ไม่มี check ถูกข้าม ไม่ตีความว่าเป็นการขาด
+    if (day.points === 0 && day.total > 0) {
+      currentStreak++;
+      maxStreak = Math.max(maxStreak, currentStreak);
+    } else {
+      currentStreak = 0;
+    }
+  });
+
+  const dailyScores = {};
+  dataset.dates.forEach(function(date) {
+    const items = {
+      attendance: attDays[date] || null,
+      cleaning: cleaningDays[date] || null,
+      subject: subjectDays[date] || null
+    };
+    let scoreSum = 0;
+    let weightSum = 0;
+    Object.keys(items).forEach(function(kind) {
+      const item = items[kind];
+      if (item && item.total > 0 && weights[kind] > 0) {
+        scoreSum += item.points / item.total * 100 * weights[kind];
+        weightSum += weights[kind];
+      }
+    });
+    if (!weightSum) {
+      dailyScores[date] = null;
+      return;
+    }
+    const score = Math.round(scoreSum / weightSum);
+    dailyScores[date] = {
+      score: score,
+      category: score >= 85 ? 'green' : score >= 60 ? 'yellow' : 'red',
+      breakdown: {
+        attendance: items.attendance ? { points: Number(items.attendance.points.toFixed(2)), total: items.attendance.total } : null,
+        cleaning: items.cleaning ? { points: Number(items.cleaning.points.toFixed(2)), total: items.cleaning.total } : null,
+        subject: items.subject ? { points: Number(items.subject.points.toFixed(2)), total: items.subject.total } : null
+      }
+    };
+  });
+
+  let category = 'yellow';
+  if (maxStreak >= 3 || (composite !== null && composite < 60)) category = 'red';
+  else if (composite === null || composite < 85 || maxStreak === 2) category = 'yellow';
+  else category = 'green';
+
+  return {
+    id: student.id,
+    name: student.name,
+    classroom_id: student.classroom_id,
+    classroom_name: student.classroom_name,
+    composite: composite,
+    hasData: composite !== null,
+    category: category,
+    streak: maxStreak,
+    breakdown: {
+      attendance: riskBreakdown(att),
+      cleaning: riskBreakdown(cleaning),
+      subject: riskBreakdown(subject)
+    },
+    dailyScores: dailyScores
+  };
+}
+
+function getStudentRiskAssessment(startDate, endDate, classroomFilter, weightsJson) {
+  try {
+    const dataset = riskCollectDataset(String(startDate || ''), String(endDate || ''), classroomFilter);
+    const weightResponse = weightsJson ? { data: riskNormalizeWeights(weightsJson) } : getRiskWeights();
+    const weights = riskNormalizeWeights(weightResponse.data || RISK_DEFAULT_WEIGHTS);
+    const results = Object.keys(dataset.students).map(function(key) {
+      return riskComputeStudent(dataset.students[key], dataset, weights);
+    });
+    const order = { red: 0, yellow: 1, green: 2 };
+    results.sort(function(a, b) {
+      if (a.category !== b.category) return order[a.category] - order[b.category];
+      if (a.composite === null) return b.composite === null ? a.name.localeCompare(b.name, 'th') : 1;
+      if (b.composite === null) return -1;
+      return a.composite - b.composite;
+    });
+    const summary = { red: 0, yellow: 0, green: 0, avgScore: 0, totalStudents: results.length, scoredStudents: 0 };
+    let scoreTotal = 0;
+    results.forEach(function(student) {
+      summary[student.category]++;
+      if (student.composite !== null) {
+        scoreTotal += student.composite;
+        summary.scoredStudents++;
+      }
+    });
+    if (summary.scoredStudents) summary.avgScore = Math.round(scoreTotal / summary.scoredStudents);
+    return {
+      status: 'success',
+      data: {
+        period: { startDate: String(startDate), endDate: String(endDate), dates: dataset.dates },
+        weights: weights,
+        summary: summary,
+        students: results
+      }
+    };
+  } catch (err) {
+    Logger.log('Error in getStudentRiskAssessment: ' + (err.message || err));
+    return { status: 'error', message: err.message || String(err) };
+  }
+}
+
+function getStudentRiskDetail(studentId, startDate, endDate, classroomFilter, weightsJson) {
+  try {
+    const dataset = riskCollectDataset(String(startDate || ''), String(endDate || ''), classroomFilter);
+    const candidates = dataset.byId[String(studentId || '').trim()] || [];
+    const student = candidates.find(function(item) { return !classroomFilter || item.classroom_id === String(classroomFilter); });
+    if (!student) return { status: 'error', message: 'ไม่พบนักเรียนในช่วงข้อมูลที่เลือก' };
+    const weights = riskNormalizeWeights(weightsJson ? weightsJson : (getRiskWeights().data || RISK_DEFAULT_WEIGHTS));
+    const assessment = riskComputeStudent(student, dataset, weights);
+    const key = student._riskKey;
+    const rows = dataset.dates.map(function(date) {
+      const att = (dataset.attendance[key] || {})[date] || null;
+      const cleaning = (dataset.cleaning[key] || {})[date] || null;
+      const subject = (dataset.subject[key] || {})[date] || null;
+      const score = assessment.dailyScores[date] || null;
+      return {
+        date: date,
+        attendance: att ? att.events : [],
+        cleaning: cleaning ? cleaning.events : [],
+        subject: subject ? subject.events : [],
+        score: score ? score.score : null,
+        category: score ? score.category : null
+      };
+    });
+    return { status: 'success', data: { student: assessment, period: { startDate: String(startDate), endDate: String(endDate) }, days: rows } };
+  } catch (err) {
+    Logger.log('Error in getStudentRiskDetail: ' + (err.message || err));
+    return { status: 'error', message: err.message || String(err) };
+  }
+}
+
+function getRedFlagStudents(startDate, endDate, classroomFilter) {
+  const result = getStudentRiskAssessment(startDate, endDate, classroomFilter);
+  if (result.status !== 'success') return result;
+  const students = result.data.students.filter(function(student) { return student.category === 'red'; });
+  return { status: 'success', data: { period: result.data.period, total: students.length, students: students } };
+}

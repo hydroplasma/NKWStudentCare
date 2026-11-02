@@ -264,6 +264,7 @@
                     ALL_CLASSROOMS = [];
                     StudentCounts = [];
                     ALL_STUDENT_COUNTS = [];
+                    if (typeof resetRiskAssessmentState === 'function') resetRiskAssessmentState();
                     checkLogin();
                     $("#login-form")[0].reset();
                 }
@@ -968,6 +969,8 @@
                         initAttendanceStats();
                     } else if (tabId === "weekly-summary") {
                         initWeeklySummary();
+                    } else if (tabId === "risk-assessment") {
+                        initRiskAssessment();
                     } else if (tabId === "classroom-summary") {
                         loadClassroomSummary();
                     } else if (tabId === "overall-summary") {
