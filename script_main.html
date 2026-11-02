@@ -988,6 +988,8 @@
                         initRiskView("monthly-summary");
                     } else if (tabId === "classroom-summary") {
                         loadClassroomSummary();
+                    } else if (tabId === "discipline") {
+                        initDiscipline();
                     }
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                 } catch (error) {

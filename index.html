@@ -362,6 +362,7 @@
   <button class="nav-tab" data-tab="classroom-summary">📊 รายชั้นเรียน</button>
   <button class="nav-tab" data-tab="weekly-summary">📆 สรุปรายสัปดาห์</button>
   <button class="nav-tab" data-tab="monthly-summary">📆 สรุปรายเดือน</button>
+  <button class="nav-tab" data-tab="discipline">⚖️ กระบวนการวินัย</button>
 </div>
     </div>
 
@@ -774,6 +775,153 @@
 
 <!-- ===== Monthly Summary (Risk Assessment) ===== -->
 <div id="monthly-summary" class="tab-content hidden" data-risk-prefix="m" data-risk-mode="month"></div>
+
+<!-- ===== Discipline Workflow ===== -->
+<div id="discipline" class="tab-content hidden">
+  <div class="app-card p-5 mb-5">
+    <div class="flex flex-col md:flex-row gap-3 items-end flex-wrap">
+      <div class="flex flex-wrap gap-2">
+        <button class="disc-stage-btn px-4 py-2 rounded-xl font-bold bg-blue-700 text-white" data-stage="all">ทั้งหมด <span class="disc-stage-count" data-stage="all">(0)</span></button>
+        <button class="disc-stage-btn px-4 py-2 rounded-xl font-bold bg-gray-100 text-gray-600" data-stage="1">📄 Stage 1 <span class="disc-stage-count" data-stage="1">(0)</span></button>
+        <button class="disc-stage-btn px-4 py-2 rounded-xl font-bold bg-gray-100 text-gray-600" data-stage="2">📋 Stage 2 <span class="disc-stage-count" data-stage="2">(0)</span></button>
+        <button class="disc-stage-btn px-4 py-2 rounded-xl font-bold bg-gray-100 text-gray-600" data-stage="3">🎯 Stage 3 <span class="disc-stage-count" data-stage="3">(0)</span></button>
+        <button class="disc-stage-btn px-4 py-2 rounded-xl font-bold bg-gray-100 text-gray-600" data-stage="4">📨 Stage 4 <span class="disc-stage-count" data-stage="4">(0)</span></button>
+        <button class="disc-stage-btn px-4 py-2 rounded-xl font-bold bg-gray-100 text-gray-600" data-stage="closed">✅ ปิดแล้ว <span class="disc-stage-count" data-stage="closed">(0)</span></button>
+      </div>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+      <div>
+        <label class="block text-gray-500 text-sm font-bold mb-1">🔍 ค้นหา</label>
+        <input type="text" id="disc-search" class="w-full" placeholder="ชื่อ/รหัส/เลขเคส">
+      </div>
+      <div>
+        <label class="block text-gray-500 text-sm font-bold mb-1">🏫 ห้อง</label>
+        <select id="disc-classroom" class="w-full"><option value="">ทุกห้อง</option></select>
+      </div>
+      <div class="flex items-end gap-2">
+        <button id="disc-refresh" class="flex-1 px-4 py-2 bg-gray-100 rounded-xl font-bold active:scale-95">🔄 โหลดใหม่</button>
+        <button id="disc-sync" class="flex-1 px-4 py-2 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-xl font-bold shadow-lg active:scale-95">📥 Sync สัปดาห์นี้</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="disc-empty" class="app-card p-5 text-center py-12 text-gray-400">กำลังโหลด...</div>
+
+  <div id="disc-list-container" class="app-card p-5 hidden">
+    <div class="table-responsive">
+      <table class="min-w-full">
+        <thead>
+          <tr class="bg-slate-800 text-white">
+            <th class="p-3 text-center">เลขเคส</th>
+            <th class="p-3 text-left">นักเรียน</th>
+            <th class="p-3 text-center">ห้อง</th>
+            <th class="p-3 text-center">Stage</th>
+            <th class="p-3 text-center">สถานะ</th>
+            <th class="p-3 text-center">สร้างเมื่อ</th>
+            <th class="p-3 text-center">ดู</th>
+          </tr>
+        </thead>
+        <tbody id="disc-list"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Case Detail Modal -->
+<div id="disc-detail-modal" class="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" style="display:none;">
+  <div class="app-card w-full max-w-3xl max-h-[92vh] flex flex-col bg-white rounded-3xl overflow-hidden">
+    <div class="flex justify-between items-center p-5 bg-gradient-to-r from-slate-800 to-slate-900 text-white">
+      <div>
+        <h2 id="disc-detail-title" class="text-lg font-bold"></h2>
+        <p id="disc-detail-sub" class="text-xs text-slate-300"></p>
+      </div>
+      <button onclick="$('#disc-detail-modal').hide()" class="text-white text-2xl font-bold hover:opacity-75">×</button>
+    </div>
+    <div class="p-5 overflow-y-auto flex-grow">
+      <h3 class="text-sm font-bold text-gray-500 uppercase mb-2">📅 Timeline</h3>
+      <div id="disc-timeline" class="space-y-2 mb-4"></div>
+
+      <h3 class="text-sm font-bold text-gray-500 uppercase mb-2">📄 เอกสาร</h3>
+      <div id="disc-docs" class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4"></div>
+
+      <h3 class="text-sm font-bold text-gray-500 uppercase mb-2">✍️ การลงนาม</h3>
+      <div id="disc-signatures" class="grid grid-cols-1 md:grid-cols-3 gap-2 mb-4"></div>
+
+      <div id="disc-activity-section" class="hidden">
+        <h3 class="text-sm font-bold text-gray-500 uppercase mb-2">🎯 กิจกรรม</h3>
+        <div id="disc-activity" class="space-y-2 mb-4"></div>
+        <div class="flex gap-2">
+          <button id="disc-activity-pass" class="flex-1 py-2 bg-emerald-600 text-white rounded-xl font-bold active:scale-95">✅ ผ่าน</button>
+          <button id="disc-activity-fail" class="flex-1 py-2 bg-rose-600 text-white rounded-xl font-bold active:scale-95">❌ ไม่ผ่าน</button>
+        </div>
+      </div>
+
+      <div id="disc-parent-section" class="hidden mt-4">
+        <h3 class="text-sm font-bold text-gray-500 uppercase mb-2">📅 นัดประชุมผู้ปกครอง</h3>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+          <div>
+            <label class="block text-xs font-bold mb-1">วันที่</label>
+            <input type="text" id="disc-meeting-date" class="w-full text-sm">
+          </div>
+          <div>
+            <label class="block text-xs font-bold mb-1">เวลา</label>
+            <input type="text" id="disc-meeting-time" class="w-full text-sm" placeholder="09:00">
+          </div>
+          <div>
+            <label class="block text-xs font-bold mb-1">สถานที่</label>
+            <input type="text" id="disc-meeting-loc" class="w-full text-sm" placeholder="ห้องประชุม">
+          </div>
+        </div>
+        <button id="disc-meeting-save" class="w-full mt-2 py-2 bg-blue-700 text-white rounded-xl font-bold active:scale-95">💾 บันทึกการนัด</button>
+      </div>
+    </div>
+    <div class="p-4 bg-gray-50 border-t flex gap-2 flex-wrap">
+      <button id="disc-btn-advance" class="flex-1 py-2 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-xl font-bold active:scale-95">🚀 ยกระดับ Stage</button>
+      <button id="disc-btn-close" class="flex-1 py-2 bg-slate-700 text-white rounded-xl font-bold active:scale-95">🚫 ปิดเคส</button>
+      <button onclick="$('#disc-detail-modal').hide()" class="px-4 py-2 bg-gray-200 rounded-xl font-bold">ปิด</button>
+    </div>
+  </div>
+</div>
+
+<!-- Signature Modal -->
+<div id="disc-sig-modal" class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" style="display:none;">
+  <div class="app-card w-full max-w-md bg-white rounded-3xl overflow-hidden">
+    <div class="flex justify-between items-center p-5 bg-gradient-to-r from-blue-800 to-indigo-900 text-white">
+      <h2 id="disc-sig-title" class="text-lg font-bold">✍️ บันทึกการลงนาม</h2>
+      <button onclick="$('#disc-sig-modal').hide()" class="text-white text-2xl hover:opacity-75">×</button>
+    </div>
+    <div class="p-5 space-y-3">
+      <div>
+        <label class="block text-sm font-bold mb-1">👤 ฝ่าย</label>
+        <select id="disc-sig-party" class="w-full">
+          <option value="director">ผู้อำนวยการ</option>
+          <option value="parent">ผู้ปกครอง</option>
+          <option value="student">นักเรียน</option>
+          <option value="witness1">ครูที่ปรึกษา (พยาน)</option>
+          <option value="witness2">งานกิจการฯ (พยาน)</option>
+        </select>
+      </div>
+      <div id="disc-sig-parent-fields" class="hidden space-y-2">
+        <div>
+          <label class="block text-sm font-bold mb-1">ชื่อผู้ปกครอง</label>
+          <input type="text" id="disc-sig-parent-name" class="w-full" placeholder="ชื่อ-สกุล">
+        </div>
+        <div>
+          <label class="block text-sm font-bold mb-1">ความสัมพันธ์</label>
+          <select id="disc-sig-parent-rel" class="w-full">
+            <option value="บิดา">บิดา</option>
+            <option value="มารดา">มารดา</option>
+            <option value="ผู้ปกครอง">ผู้ปกครอง</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="p-5 flex gap-3">
+      <button onclick="$('#disc-sig-modal').hide()" class="flex-1 py-3 bg-gray-100 rounded-2xl font-bold">ยกเลิก</button>
+      <button id="disc-sig-save" class="flex-1 py-3 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-2xl font-bold">💾 บันทึก</button>
+    </div>
+  </div>
+</div>
 
 <!-- Print Config Modal: prepares documents for printing only; it does not contact guardians. -->
 <div id="print-config-modal" class="fixed inset-0 z-[60] items-center justify-center bg-black/50 backdrop-blur-sm p-4" style="display:none;">

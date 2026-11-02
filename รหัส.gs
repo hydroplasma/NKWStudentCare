@@ -2931,3 +2931,903 @@ function getStudentRiskHistory(studentId, weeksBack, classroomFilter) {
     return { status: 'error', message: err.toString() };
   }
 }
+
+// ========================================
+// PHASE 4: DISCIPLINE WORKFLOW
+// ========================================
+
+const DISCIPLINE_SHEETS = { CASES: 'Discipline_Cases', LOGS: 'Discipline_Logs' };
+
+const DISCIPLINE_HEADERS = {
+  CASES: [
+    'case_id','student_id','student_name','classroom_id','classroom_name',
+    'stage','status','trigger',
+    'warn_doc_no','warn_date','bond_doc_no','bond_date','bond_start','bond_end',
+    'activity_doc_no','activity_date','parent_doc_no','parent_date',
+    'parent_name','parent_relation','activity_data','activity_result',
+    'meeting_date','meeting_time','meeting_location',
+    'signed_director_at','signed_parent_at','signed_student_at',
+    'signed_witness1_at','signed_witness2_at',
+    'printed_warning_at','printed_bond_at','printed_activity_at','printed_parent_at',
+    'notes','created_at','updated_at'
+  ],
+  LOGS: ['log_id','case_id','action','stage_from','stage_to','actor','note','created_at']
+};
+
+function getDisciplineSheet(kind) {
+  const ss = getSpreadsheet();
+  const name = kind === 'CASES' ? DISCIPLINE_SHEETS.CASES : DISCIPLINE_SHEETS.LOGS;
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    sheet = ss.insertSheet(name);
+    const headers = DISCIPLINE_HEADERS[kind];
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers])
+      .setFontWeight('bold').setBackground('#1e40af').setFontColor('#fff');
+    sheet.setFrozenRows(1);
+    sheet.autoResizeColumns(1, headers.length);
+  }
+  return sheet;
+}
+
+function rowToCaseObj(row) {
+  const safeJson = (v) => { try { return v ? JSON.parse(v) : null; } catch(e) { return null; } };
+  return {
+    case_id: String(row[0] || ''), student_id: String(row[1] || ''),
+    student_name: String(row[2] || ''), classroom_id: String(row[3] || ''),
+    classroom_name: String(row[4] || ''), stage: String(row[5] || ''),
+    status: String(row[6] || ''), trigger: String(row[7] || ''),
+    warn_doc_no: String(row[8] || ''), warn_date: formatDateStr(row[9]),
+    bond_doc_no: String(row[10] || ''), bond_date: formatDateStr(row[11]),
+    bond_start: formatDateStr(row[12]), bond_end: formatDateStr(row[13]),
+    activity_doc_no: String(row[14] || ''), activity_date: formatDateStr(row[15]),
+    parent_doc_no: String(row[16] || ''), parent_date: formatDateStr(row[17]),
+    parent_name: String(row[18] || ''), parent_relation: String(row[19] || ''),
+    activity_data: safeJson(row[20]), activity_result: String(row[21] || ''),
+    meeting_date: formatDateStr(row[22]), meeting_time: String(row[23] || ''),
+    meeting_location: String(row[24] || ''),
+    signed_director_at: String(row[25] || ''), signed_parent_at: String(row[26] || ''),
+    signed_student_at: String(row[27] || ''),
+    signed_witness1_at: String(row[28] || ''), signed_witness2_at: String(row[29] || ''),
+    printed_warning_at: String(row[30] || ''), printed_bond_at: String(row[31] || ''),
+    printed_activity_at: String(row[32] || ''), printed_parent_at: String(row[33] || ''),
+    notes: String(row[34] || ''), created_at: String(row[35] || ''),
+    updated_at: String(row[36] || '')
+  };
+}
+
+function getDisciplineConfig() {
+  const sheet = getOrCreateSheet(SHEET_NAMES.CONFIG);
+  const data = sheet.getDataRange().getValues();
+  const cfg = {
+    school_name: 'โรงเรียน',
+    director_name: '.....................................................',
+    director_position: 'ผู้อำนวยการโรงเรียน',
+    discipline_teacher: '.....................................................'
+  };
+  data.slice(1).forEach(r => {
+    const k = String(r[0] || '').trim(), v = String(r[1] || '').trim();
+    if (k === 'schoolName') cfg.school_name = v || cfg.school_name;
+    if (k === 'director_name') cfg.director_name = v || cfg.director_name;
+    if (k === 'director_position') cfg.director_position = v || cfg.director_position;
+    if (k === 'discipline_teacher') cfg.discipline_teacher = v || cfg.discipline_teacher;
+  });
+  return cfg;
+}
+
+function getClassroomAdvisor(classroomId) {
+  try {
+    const teachers = getTeachers().data || [];
+    const t = teachers.find(t => (t.classroom_ids || []).map(String).includes(String(classroomId)));
+    return t ? t.name : '.....................................................';
+  } catch(e) { return '.....................................................'; }
+}
+
+// ---------- CRUD ----------
+
+function getDisciplineCases(filter) {
+  try {
+    filter = filter || {};
+    const sheet = getDisciplineSheet('CASES');
+    const data = sheet.getDataRange().getValues();
+    let cases = data.slice(1).map(rowToCaseObj).filter(c => c.case_id);
+
+    if (filter.stage && filter.stage !== 'all') cases = cases.filter(c => c.stage === String(filter.stage));
+    if (filter.classroom) cases = cases.filter(c => c.classroom_id === filter.classroom);
+    if (filter.search) {
+      const q = String(filter.search).toLowerCase();
+      cases = cases.filter(c => c.student_name.toLowerCase().includes(q) || c.student_id.includes(q) || c.case_id.toLowerCase().includes(q));
+    }
+
+    const order = { '1': 0, '2': 1, '3': 2, '4': 3, 'closed': 4 };
+    cases.sort((a, b) => {
+      if (a.stage !== b.stage) return (order[a.stage] ?? 9) - (order[b.stage] ?? 9);
+      return new Date(b.created_at) - new Date(a.created_at);
+    });
+
+    const stats = { stage1: 0, stage2: 0, stage3: 0, stage4: 0, closed: 0 };
+    data.slice(1).forEach(r => {
+      const st = String(r[5] || '');
+      if (st === '1') stats.stage1++;
+      else if (st === '2') stats.stage2++;
+      else if (st === '3') stats.stage3++;
+      else if (st === '4') stats.stage4++;
+      else if (st === 'closed') stats.closed++;
+    });
+
+    return { status: 'success', data: { cases, stats } };
+  } catch (err) {
+    return { status: 'error', message: err.toString(), data: { cases: [], stats: {} } };
+  }
+}
+
+function getDisciplineCaseDetail(caseId) {
+  try {
+    const sheet = getDisciplineSheet('CASES');
+    const data = sheet.getDataRange().getValues();
+    const row = data.slice(1).find(r => String(r[0]) === String(caseId));
+    if (!row) return { status: 'error', message: 'ไม่พบเคส' };
+
+    const caseData = rowToCaseObj(row);
+    const cfg = getDisciplineConfig();
+
+    // Load logs
+    const logSheet = getDisciplineSheet('LOGS');
+    const logData = logSheet.getDataRange().getValues();
+    const logs = logData.slice(1)
+      .filter(l => String(l[1]) === String(caseId))
+      .map(l => ({
+        log_id: String(l[0] || ''), action: String(l[2] || ''),
+        stage_from: String(l[3] || ''), stage_to: String(l[4] || ''),
+        actor: String(l[5] || ''), note: String(l[6] || ''),
+        created_at: String(l[7] || '')
+      }))
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    return {
+      status: 'success',
+      data: {
+        case: caseData, logs,
+        config: cfg,
+        advisor: getClassroomAdvisor(caseData.classroom_id)
+      }
+    };
+  } catch (err) {
+    return { status: 'error', message: err.toString() };
+  }
+}
+
+function addDisciplineLog(caseId, action, stageFrom, stageTo, actor, note) {
+  try {
+    const logSheet = getDisciplineSheet('LOGS');
+    const logId = 'L' + Date.now() + Math.floor(Math.random() * 1000);
+    logSheet.appendRow([
+      logId, caseId, action, stageFrom || '', stageTo || '',
+      actor || '', note || '', new Date().toISOString()
+    ]);
+  } catch(e) { Logger.log('Log error: ' + e.message); }
+}
+
+// ---------- Auto-sync from assessment ----------
+
+function syncDisciplineFromWeekly(startDate, endDate, actor) {
+  try {
+    const assess = getStudentRiskAssessment(startDate, endDate, '', '');
+    if (assess.status !== 'success') throw new Error(assess.message);
+
+    const students = assess.data.students || [];
+    const sheet = getDisciplineSheet('CASES');
+    const data = sheet.getDataRange().getValues();
+    const cases = data.slice(1).map(rowToCaseObj).filter(c => c.case_id);
+
+    const created = [], advanced = [];
+    const year = new Date().getFullYear() + 543;
+    let maxNum = 0;
+    cases.forEach(c => { const m = c.case_id.match(/D-(\d+)-(\d+)/); if (m && +m[1] === year) maxNum = Math.max(maxNum, +m[2]); });
+
+    students.forEach(s => {
+      const active = cases.find(c => c.student_id === s.id && c.stage !== 'closed');
+      const now = new Date().toISOString();
+
+      // ไม่มีเคส → ถ้า Yellow/Red สร้าง Stage 1
+      if (!active) {
+        if (s.category === 'red' || s.category === 'yellow') {
+          maxNum++;
+          const caseId = `D-${year}-${String(maxNum).padStart(3, '0')}`;
+          const trigger = s.category === 'red' ? 'red_1' : 'yellow';
+          const row = new Array(37).fill('');
+          row[0] = caseId; row[1] = s.id; row[2] = s.name;
+          row[3] = s.classroom_id; row[4] = s.classroom_name;
+          row[5] = '1'; row[6] = 'active'; row[7] = trigger;
+          row[35] = now; row[36] = now;
+          sheet.appendRow(row);
+          addDisciplineLog(caseId, 'created', '', '1', actor || 'system', `สร้างเคสอัตโนมัติ (${trigger})`);
+          created.push({ case_id: caseId, student_name: s.name });
+        }
+      } else {
+        // มีเคสแล้ว → เช็ค escalation
+        // Stage 1 + ยัง Yellow/Red หลัง 7 วัน → Stage 2
+        if (active.stage === '1' && (s.category === 'red' || s.category === 'yellow')) {
+          const createdDate = new Date(active.created_at);
+          const daysSince = Math.floor((Date.now() - createdDate.getTime()) / (1000*60*60*24));
+          if (daysSince >= 7) {
+            advanceDisciplineStage(active.case_id, '2', 'ฝ่าฝืนซ้ำหลังตักเตือน 7 วัน', actor || 'system');
+            advanced.push({ case_id: active.case_id, to: '2' });
+          }
+        }
+        // Stage 2 + Red ติดต่อกัน 3 สัปดาห์ → Stage 3
+        else if (active.stage === '2' && s.category === 'red' && (s.streak || 0) >= 3) {
+          advanceDisciplineStage(active.case_id, '3', 'Red 3+ สัปดาห์ติด', actor || 'system');
+          advanced.push({ case_id: active.case_id, to: '3' });
+        }
+      }
+    });
+
+    return { status: 'success', data: { created, advanced, totalProcessed: students.length } };
+  } catch (err) {
+    Logger.log('syncDisciplineFromWeekly error: ' + err.message);
+    return { status: 'error', message: err.toString(), data: { created: [], advanced: [] } };
+  }
+}
+
+// ---------- Advance stage / signature / activity ----------
+
+function advanceDisciplineStage(caseId, newStage, note, actor) {
+  try {
+    const sheet = getDisciplineSheet('CASES');
+    const data = sheet.getDataRange().getValues();
+    const idx = data.slice(1).findIndex(r => String(r[0]) === caseId) + 2;
+    if (idx <= 1) return { status: 'error', message: 'ไม่พบเคส' };
+
+    const oldStage = String(data[idx - 1][5]);
+    const allowedNextStages = { '1': ['2', 'closed'], '2': ['3', 'closed'], '3': ['4', 'closed'], '4': ['closed'] };
+    if (!(allowedNextStages[oldStage] || []).includes(String(newStage))) {
+      return { status: 'error', message: `ไม่สามารถเปลี่ยนจาก Stage ${oldStage} เป็น ${newStage} ได้` };
+    }
+    const now = new Date().toISOString();
+
+    // อัปเดต
+    sheet.getRange(idx, 6).setValue(newStage);
+    sheet.getRange(idx, 7).setValue(newStage === 'closed' ? 'closed' : 'active');
+    sheet.getRange(idx, 37).setValue(now);
+
+    // ตั้งค่า activity default ถ้าเป็น Stage 3
+    if (newStage === '3' && !String(data[idx - 1][20] || '').trim()) {
+      const start = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      const end = Utilities.formatDate(new Date(Date.now() + 14 * 86400000), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      const activityData = {
+        items: [
+          { id: 'a1', label: 'บำเพ็ญประโยชน์', unit: 'ชั่วโมง', target: 10, progress: 0 },
+          { id: 'a2', label: 'ทำความสะอาดเขตพื้นที่', unit: 'ครั้ง', target: 3, progress: 0 },
+          { id: 'a3', label: 'รับคำปรึกษา', unit: 'ครั้ง', target: 2, progress: 0 }
+        ],
+        start, end
+      };
+      sheet.getRange(idx, 21).setValue(JSON.stringify(activityData));
+      sheet.getRange(idx, 22).setValue('pending');
+    }
+
+    // ตั้งค่า bond default ถ้าเป็น Stage 2
+    if (newStage === '2' && !String(data[idx - 1][12] || '').trim()) {
+      const start = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      const end = Utilities.formatDate(new Date(Date.now() + 90 * 86400000), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      sheet.getRange(idx, 13).setValue(start);
+      sheet.getRange(idx, 14).setValue(end);
+    }
+
+    addDisciplineLog(caseId, 'stage_advance', oldStage, newStage, actor || '', note || '');
+    return { status: 'success', message: `ยกระดับเป็น Stage ${newStage} สำเร็จ`, data: { oldStage, newStage } };
+  } catch (err) {
+    return { status: 'error', message: err.toString() };
+  }
+}
+
+function recordSignature(caseId, party, meta) {
+  try {
+    meta = meta || {};
+    const colMap = {
+      director: 26, parent: 27, student: 28, witness1: 29, witness2: 30
+    };
+    const col = colMap[party];
+    if (!col) return { status: 'error', message: 'party ไม่ถูกต้อง' };
+
+    const sheet = getDisciplineSheet('CASES');
+    const data = sheet.getDataRange().getValues();
+    const idx = data.slice(1).findIndex(r => String(r[0]) === caseId) + 2;
+    if (idx <= 1) return { status: 'error', message: 'ไม่พบเคส' };
+    if (String(data[idx - 1][5] || '') !== '2') return { status: 'error', message: 'การลงนามใช้ได้เฉพาะ Stage 2 เท่านั้น' };
+
+    const now = new Date().toISOString();
+    sheet.getRange(idx, col).setValue(now);
+
+    // ถ้าเป็น Stage 2 → เก็บชื่อผู้ปกครอง/ความสัมพันธ์
+    if (party === 'parent') {
+      if (meta.name) sheet.getRange(idx, 19).setValue(meta.name);
+      if (meta.relation) sheet.getRange(idx, 20).setValue(meta.relation);
+    }
+
+    sheet.getRange(idx, 37).setValue(now);
+    addDisciplineLog(caseId, 'signed', '', '', party, `${party} signed`);
+
+    // เช็คว่า Stage 2 ครบ 3 ฝ่ายหรือยัง
+    const row = sheet.getRange(idx, 1, 1, 37).getValues()[0];
+    const stage = String(row[5]);
+    if (stage === '2') {
+      const s1 = String(row[25] || '').trim();
+      const s2 = String(row[26] || '').trim();
+      const s3 = String(row[27] || '').trim();
+      if (s1 && s2 && s3) {
+        sheet.getRange(idx, 7).setValue('active');
+        addDisciplineLog(caseId, 'signatures_complete', '', '', 'system', 'ครบ 3 ฝ่าย → active');
+      }
+    }
+
+    return { status: 'success', message: 'บันทึกการลงนามสำเร็จ' };
+  } catch (err) {
+    return { status: 'error', message: err.toString() };
+  }
+}
+
+function updateActivityProgress(caseId, itemId, delta) {
+  try {
+    const sheet = getDisciplineSheet('CASES');
+    const data = sheet.getDataRange().getValues();
+    const idx = data.slice(1).findIndex(r => String(r[0]) === caseId) + 2;
+    if (idx <= 1) return { status: 'error', message: 'ไม่พบเคส' };
+    if (String(data[idx - 1][5] || '') !== '3') return { status: 'error', message: 'การอัปเดตกิจกรรมใช้ได้เฉพาะ Stage 3 เท่านั้น' };
+
+    let actData;
+    try { actData = JSON.parse(data[idx - 1][20] || '{}'); } catch(e) { actData = { items: [] }; }
+
+    const item = (actData.items || []).find(i => i.id === itemId);
+    if (!item) return { status: 'error', message: 'ไม่พบกิจกรรม' };
+    item.progress = Math.max(0, Math.min(item.target, (item.progress || 0) + delta));
+
+    sheet.getRange(idx, 21).setValue(JSON.stringify(actData));
+    sheet.getRange(idx, 37).setValue(new Date().toISOString());
+    return { status: 'success', data: { activity: actData } };
+  } catch (err) {
+    return { status: 'error', message: err.toString() };
+  }
+}
+
+function markActivityResult(caseId, result) {
+  try {
+    if (!['pass', 'fail'].includes(result)) return { status: 'error', message: 'result ไม่ถูกต้อง' };
+    const sheet = getDisciplineSheet('CASES');
+    const data = sheet.getDataRange().getValues();
+    const idx = data.slice(1).findIndex(r => String(r[0]) === caseId) + 2;
+    if (idx <= 1) return { status: 'error', message: 'ไม่พบเคส' };
+    if (String(data[idx - 1][5] || '') !== '3') return { status: 'error', message: 'การสรุปผลกิจกรรมใช้ได้เฉพาะ Stage 3 เท่านั้น' };
+
+    sheet.getRange(idx, 22).setValue(result);
+    sheet.getRange(idx, 37).setValue(new Date().toISOString());
+    addDisciplineLog(caseId, 'activity_' + result, '', '', 'system', `กิจกรรม ${result}`);
+
+    return { status: 'success', message: result === 'pass' ? 'บันทึกว่าผ่านกิจกรรม' : 'บันทึกว่าไม่ผ่าน → ยกระดับเป็น Stage 4' };
+  } catch (err) {
+    return { status: 'error', message: err.toString() };
+  }
+}
+
+function markDocPrinted(caseId, docType) {
+  try {
+    const colMap = { warning: 31, bond: 32, activity: 33, parent: 34 };
+    const col = colMap[docType];
+    if (!col) return { status: 'error' };
+    const sheet = getDisciplineSheet('CASES');
+    const data = sheet.getDataRange().getValues();
+    const idx = data.slice(1).findIndex(r => String(r[0]) === caseId) + 2;
+    if (idx <= 1) return { status: 'error' };
+    sheet.getRange(idx, col).setValue(new Date().toISOString());
+    return { status: 'success' };
+  } catch (err) { return { status: 'error', message: err.toString() }; }
+}
+
+function generateDocNo(caseId, docType) {
+  const prefix = 'ศธ 04201/' + (new Date().getFullYear() + 543).toString().substring(2);
+  const num = String(Math.floor(Math.random() * 900) + 100);
+  return prefix + num;
+}
+
+// ---------- Document HTML builders ----------
+
+function buildDocStyle() {
+  return `<style>
+    @page { size: A4; margin: 2cm 2cm 2cm 2.5cm; }
+    body { font-family: 'TH Sarabun New', 'TH SarabunPSK', 'Sarabun', sans-serif; font-size: 16pt; line-height: 1.4; margin: 0; color: #000; }
+    .toolbar { position: fixed; top: 10px; right: 10px; background: #fff; padding: 8px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,.15); z-index: 999; }
+    .toolbar button { padding: 6px 14px; border: 1px solid #ccc; border-radius: 6px; cursor: pointer; font-weight: bold; }
+    @media print { .toolbar { display: none; } }
+    .garuda { text-align: center; font-size: 40pt; line-height: 1; margin-bottom: 4px; }
+    .header { text-align: center; font-size: 18pt; font-weight: bold; }
+    .header-sub { text-align: center; font-size: 16pt; margin-bottom: 20px; }
+    .meta { display: flex; justify-content: space-between; margin-bottom: 16px; }
+    .indent { text-indent: 2.5cm; text-align: justify; margin: 8px 0; }
+    .check-line { padding-left: 3cm; text-indent: -0.8cm; margin: 4px 0; }
+    .signature { text-align: right; margin-top: 40px; }
+    .sig-row { display: flex; justify-content: space-around; margin-top: 40px; }
+    .sig-row > div { text-align: center; width: 45%; }
+    .cut-line { border-top: 1px dashed #999; margin: 30px 0 20px; }
+    .page-break { page-break-after: always; }
+  </style>`;
+}
+
+function buildDocWrap(title, body) {
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${title}</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap" rel="stylesheet">
+${buildDocStyle()}</head><body>
+<div class="toolbar"><button onclick="window.print()">🖨️ พิมพ์ / บันทึก PDF</button></div>
+${body}
+</body></html>`;
+}
+
+function formatThaiDateLong(ds) {
+  if (!ds) return '...............';
+  const p = ds.split('-');
+  if (p.length !== 3) return ds;
+  const months = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+  return `${parseInt(p[2])} ${months[parseInt(p[1]) - 1]} ${parseInt(p[0]) + 543}`;
+}
+
+function disciplineEscapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function sanitizeDisciplineDocumentData(caseData, config, advisor) {
+  const safeCase = JSON.parse(JSON.stringify(caseData || {}));
+  [
+    'case_id','student_id','student_name','classroom_id','classroom_name','stage','status','trigger',
+    'warn_doc_no','bond_doc_no','activity_doc_no','parent_doc_no','parent_name','parent_relation',
+    'activity_result','warn_date','bond_date','bond_start','bond_end','activity_date','parent_date',
+    'meeting_date','meeting_time','meeting_location','notes'
+  ].forEach(key => { safeCase[key] = disciplineEscapeHtml(safeCase[key]); });
+  if (safeCase.activity_data) {
+    safeCase.activity_data.start = disciplineEscapeHtml(safeCase.activity_data.start);
+    safeCase.activity_data.end = disciplineEscapeHtml(safeCase.activity_data.end);
+    safeCase.activity_data.items = (safeCase.activity_data.items || []).map(item => Object.assign({}, item, {
+      id: disciplineEscapeHtml(item.id), label: disciplineEscapeHtml(item.label),
+      unit: disciplineEscapeHtml(item.unit), target: disciplineEscapeHtml(item.target)
+    }));
+  }
+  const safeConfig = {};
+  Object.keys(config || {}).forEach(key => { safeConfig[key] = disciplineEscapeHtml(config[key]); });
+  return { caseData: safeCase, config: safeConfig, advisor: disciplineEscapeHtml(advisor) };
+}
+
+function buildWarningDocHtml(cData, cfg, advisor) {
+  const { docNo, docDate } = ensureDocNo(cData.case_id, 'warning');
+  const year = parseInt(docDate.split('-')[0]) + 543;
+  const yearShort = String(year).substring(2);
+
+  const body = `
+    <div class="garuda">🦁</div>
+    <div class="header">${cfg.school_name}</div>
+    <div class="header-sub">${cfg.school_name}</div>
+
+    <div class="meta">
+      <div>ที่ ${docNo}</div>
+      <div>${formatThaiDateLong(docDate)}</div>
+    </div>
+
+    <div><strong>เรื่อง</strong> ตักเตือนเรื่องความประพฤติ</div>
+    <div><strong>เรียน</strong> ${cData.student_name} ชั้น ${cData.classroom_name} เลขประจำตัว ${cData.student_id}</div>
+
+    <div class="indent">
+      ด้วย${cfg.school_name} ได้ติดตามพฤติกรรมของนักเรียนอย่างต่อเนื่อง พบว่านักเรียนมีผลการประเมินความประพฤติอยู่ในกลุ่ม <strong>"ใกล้ชิด"</strong> ต่อเนื่องกัน ซึ่งต่ำกว่าเกณฑ์ที่โรงเรียนกำหนด อันได้แก่ การเข้าแถว การร่วมกิจกรรม และการเข้าเรียน
+    </div>
+
+    <div class="indent">
+      โรงเรียนจึงขอว่ากล่าวตักเตือนนักเรียนให้ปรับปรุงพฤติกรรมด้านการเข้าเรียน การร่วมกิจกรรม และการทำเวรให้ดีขึ้น หากยังฝ่าฝืนอีก โรงเรียนจะดำเนินการตามระเบียบกระทรวงศึกษาธิการ ว่าด้วยการลงโทษนักเรียนและนักศึกษา พ.ศ. 2548 ต่อไป
+    </div>
+
+    <div class="indent">จึงเรียนมาเพื่อโปรดทราบและปฏิบัติตาม</div>
+
+    <div class="signature">
+      <div>ขอแสดงความนับถือ</div>
+      <div style="margin-top: 40px;">ลงชื่อ .....................................................</div>
+      <div>(${advisor})</div>
+      <div>ครูที่ปรึกษา</div>
+    </div>
+  `;
+  return buildDocWrap('หนังสือตักเตือน', body);
+}
+
+function buildBondDocHtml(cData, cfg, advisor) {
+  const { docNo, docDate } = ensureDocNo(cData.case_id, 'bond');
+  const bondStart = cData.bond_start || formatDateStr(new Date());
+  const bondEnd = cData.bond_end || Utilities.formatDate(new Date(Date.now() + 90*86400000), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const parentName = cData.parent_name || '.....................................................';
+  const parentRel = cData.parent_relation || 'บิดา/มารดา/ผู้ปกครอง';
+
+  // Page 1
+  const page1 = `
+    <div class="header" style="font-size: 20pt; margin: 10px 0;">บันทึกทัณฑ์บน</div>
+    <div class="meta">
+      <div>ที่ ${docNo}</div>
+      <div>${formatThaiDateLong(docDate)}</div>
+    </div>
+    <div><strong>เรื่อง</strong> ทำทัณฑ์บนนักเรียน</div>
+    <div><strong>เรียน</strong> ผู้อำนวยการ${cfg.school_name}</div>
+
+    <div style="margin: 12px 0;">
+      <strong>1. ข้อมูลนักเรียน</strong>
+      <div style="padding-left: 1cm; margin-top: 4px;">
+        <div>ชื่อ-สกุล: <strong>${cData.student_name}</strong></div>
+        <div>ชั้น: ${cData.classroom_name} &nbsp;&nbsp; เลขประจำตัว: ${cData.student_id}</div>
+        <div>ครูที่ปรึกษา: ${advisor}</div>
+      </div>
+    </div>
+
+    <div style="margin: 12px 0;">
+      <strong>2. พฤติกรรมที่กระทำผิด</strong>
+      <div style="padding-left: 1cm; margin-top: 4px;">
+        <div class="check-line">☑ ขาดเรียนบ่อย / เข้าแถวไม่ตรงเวลา / ไม่ทำเวรตามที่ได้รับมอบหมาย</div>
+        <div class="check-line">☑ มีผลการประเมินความประพฤติอยู่ในกลุ่ม "ใกล้ชิด" ต่อเนื่องกัน</div>
+      </div>
+    </div>
+
+    <div style="margin: 12px 0;">
+      <strong>3. เงื่อนไขการทำทัณฑ์บน</strong>
+      <div style="padding-left: 1cm; margin-top: 4px;">
+        <div>3.1 ระยะเวลาทัณฑ์บน: ตั้งแต่ ${formatThaiDateLong(bondStart)} ถึง ${formatThaiDateLong(bondEnd)}</div>
+        <div>3.2 ระหว่าง periodo ทัณฑ์บน นักเรียนต้อง:</div>
+        <div class="check-line">(1) ไม่กระทำความผิดซ้ำในลักษณะเดียวกัน</div>
+        <div class="check-line">(2) เข้าเรียนและร่วมกิจกรรมอย่างสม่ำเสมอ</div>
+        <div class="check-line">(3) รายงานตัวต่อครูที่ปรึกษาทุกสัปดาห์</div>
+        <div class="check-line">(4) ปฏิบัติตามคำสั่งของโรงเรียนอย่างเคร่งครัด</div>
+        <div style="margin-top: 6px;">3.3 หากฝ่าฝืนหรือไม่ปฏิบัติตามเงื่อนไข โรงเรียนจะพิจารณาลงโทษตามระเบียบกระทรวงศึกษาธิการ ว่าด้วยการลงโทษนักเรียนและนักศึกษา พ.ศ. 2548 ต่อไป</div>
+      </div>
+    </div>
+
+    <div class="indent">
+      จึงเรียนมาเพื่อโปรดพิจารณาลงนามอนุมัติ
+    </div>
+
+    <div style="text-align: right; margin-top: 30px;">
+      <div>ลงชื่อ ..................................................... พยาน</div>
+      <div>(${advisor})</div>
+      <div>ครูที่ปรึกษา</div>
+      <div style="margin-top: 6px;">วันที่ ......... / ......... / .........</div>
+    </div>
+
+    <div class="page-break"></div>
+  `;
+
+  // Page 2
+  const page2 = `
+    <div class="header" style="font-size: 20pt;">บันทึกทัณฑ์บน (หน้า 2)</div>
+
+    <div style="text-align: center; margin: 30px 0; font-weight: bold; font-size: 15pt;">
+      คู่สัญญาทั้ง 3 ฝ่าย ได้อ่านและเข้าใจข้อความในบันทึกทัณฑ์บนนี้โดยตลอดแล้ว<br>
+      จึงได้ลงลายมือชื่อไว้เป็นหลักฐาน
+    </div>
+
+    <div style="margin: 20px 0;">
+      <div style="text-align: center; font-weight: bold; margin-bottom: 12px;">
+        ─── ฝ่ายที่ 1: ผู้ทำทัณฑ์บน (นักเรียน) ───
+      </div>
+      <div style="text-align: center;">
+        <div>ข้าพเจ้าขอยอมรับว่ากระทำความผิดตามที่ระบุไว้จริง และขอสัญญาว่าจะไม่กระทำความผิดซ้ำอีก</div>
+        <div style="margin-top: 25px;">ลงชื่อ ..................................................... ผู้ทำทัณฑ์บน</div>
+        <div>( ${cData.student_name} )</div>
+        <div>วันที่ ......... / ......... / .........</div>
+      </div>
+    </div>
+
+    <div style="margin: 20px 0;">
+      <div style="text-align: center; font-weight: bold; margin-bottom: 12px;">
+        ─── ฝ่ายที่ 2: ผู้รับรองการทำทัณฑ์บน (ผู้ปกครอง) ───
+      </div>
+      <div style="text-align: center;">
+        <div>ข้าพเจ้าได้รับทราบถึงความผิดของบุตรหลานแล้ว และขอรับรองว่าจะดูแลให้ปฏิบัติตามเงื่อนไขของทัณฑ์บน</div>
+        <div style="margin-top: 25px;">ลงชื่อ ..................................................... ผู้ปกครอง</div>
+        <div>( ${parentName} )</div>
+        <div>เกี่ยวข้องเป็น ${parentRel}</div>
+        <div>วันที่ ......... / ......... / .........</div>
+      </div>
+    </div>
+
+    <div style="margin: 20px 0;">
+      <div style="text-align: center; font-weight: bold; margin-bottom: 12px;">
+        ─── ฝ่ายที่ 3: ผู้ลงโทษ (ผู้บริหารสถานศึกษา) ───
+      </div>
+      <div style="text-align: center;">
+        <div>อาศัยอำนาจตามระเบียบกระทรวงศึกษาธิการ ว่าด้วยการลงโทษนักเรียนและนักศึกษา พ.ศ. 2548 จึงสั่งให้ทำทัณฑ์บนไว้เป็นหนังสือ</div>
+        <div style="margin-top: 25px;">ลงชื่อ ..................................................... ผู้สั่งลงโทษ</div>
+        <div>( ${cfg.director_name} )</div>
+        <div>${cfg.director_position}</div>
+        <div>${cfg.school_name}</div>
+        <div>วันที่ ......... / ......... / .........</div>
+      </div>
+    </div>
+
+    <div style="margin: 20px 0;">
+      <div style="text-align: center; font-weight: bold; margin-bottom: 12px;">
+        ─── พยานในการรับทราบ ───
+      </div>
+      <div class="sig-row">
+        <div>
+          <div style="margin-top: 25px;">ลงชื่อ ..................................................... พยาน</div>
+          <div>( ${advisor} )</div>
+          <div>ครูที่ปรึกษา</div>
+          <div>วันที่ ......... / ......... / .........</div>
+        </div>
+        <div>
+          <div style="margin-top: 25px;">ลงชื่อ ..................................................... พยาน</div>
+          <div>( ${cfg.discipline_teacher} )</div>
+          <div>หัวหน้างานกิจการนักเรียน</div>
+          <div>วันที่ ......... / ......... / .........</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  return buildDocWrap('บันทึกทัณฑ์บน', page1 + page2);
+}
+
+function buildActivityDocHtml(cData, cfg, advisor) {
+  const { docNo, docDate } = ensureDocNo(cData.case_id, 'activity');
+  const act = cData.activity_data || { items: [], start: '', end: '' };
+
+  let activitiesHtml = '<div style="padding-left: 1cm;">';
+  (act.items || []).forEach((it, i) => {
+    activitiesHtml += `<div class="check-line">☐ ${it.label} จำนวน ${it.target} ${it.unit}</div>`;
+  });
+  activitiesHtml += '</div>';
+
+  const body = `
+    <div class="garuda">🦁</div>
+    <div class="header">คำสั่ง${cfg.school_name}</div>
+    <div class="header">ที่ ${docNo}</div>
+    <div class="header">เรื่อง มอบหมายกิจกรรมเพื่อปรับเปลี่ยนพฤติกรรม</div>
+
+    <div style="text-align: center; margin: 20px 0;">─────────────</div>
+
+    <div class="indent">
+      อาศัยอำนาจตามระเบียบกระทรวงศึกษาธิการ ว่าด้วยการลงโทษนักเรียนและนักศึกษา พ.ศ. 2548 และบันทึกทัณฑ์บนที่ ${cData.bond_doc_no || '.........'} ลงวันที่ ${cData.bond_date ? formatThaiDateLong(cData.bond_date) : '.........'} ประกอบกับนักเรียน <strong>${cData.student_name}</strong> ชั้น ${cData.classroom_name} เลขประจำตัว ${cData.student_id} ได้ฝ่าฝืนเงื่อนไขของทัณฑ์บน
+    </div>
+
+    <div class="indent">
+      โรงเรียนจึงมีคำสั่งให้นักเรียนดำเนินกิจกรรมเพื่อปรับเปลี่ยนพฤติกรรม ดังต่อไปนี้:
+    </div>
+
+    <div style="margin: 12px 0;">${activitiesHtml}</div>
+
+    <div class="indent">
+      <strong>ระยะเวลาดำเนินการ:</strong> ตั้งแต่วันที่ ${act.start ? formatThaiDateLong(act.start) : '.........'} ถึง ${act.end ? formatThaiDateLong(act.end) : '.........'}
+    </div>
+
+    <div class="indent">
+      <strong>ผู้ติดตามผล:</strong> ${advisor} ครูที่ปรึกษา
+    </div>
+
+    <div class="indent">
+      ขอให้นักเรียนและผู้ปกครองให้ความร่วมมือในการดำเนินกิจกรรมตามที่กำหนด หากนักเรียนไม่ดำเนินการหรือดำเนินการไม่ครบถ้วน โรงเรียนจะพิจารณาแจ้งผู้ปกครองและดำเนินการตามระเบียบวินัยต่อไป
+    </div>
+
+    <div style="text-align: right; margin-top: 40px;">
+      <div>สั่ง ณ วันที่ ${formatThaiDateLong(docDate)}</div>
+      <div style="margin-top: 40px;">ลงชื่อ ..................................................... ผู้สั่ง</div>
+      <div>( ${cfg.director_name} )</div>
+      <div>${cfg.director_position}</div>
+      <div>${cfg.school_name}</div>
+    </div>
+
+    <div class="sig-row">
+      <div>
+        <div style="font-weight: bold;">รับทราบ</div>
+        <div style="margin-top: 30px;">ลงชื่อ ..................................................... นักเรียน</div>
+        <div>( ${cData.student_name} )</div>
+        <div>วันที่ ......... / ......... / .........</div>
+      </div>
+      <div>
+        <div style="font-weight: bold;">รับทราบ</div>
+        <div style="margin-top: 30px;">ลงชื่อ ..................................................... ผู้ปกครอง</div>
+        <div>( ${cData.parent_name || '.............'} )</div>
+        <div>วันที่ ......... / ......... / .........</div>
+      </div>
+    </div>
+  `;
+  return buildDocWrap('คำสั่งมอบหมายกิจกรรม', body);
+}
+
+function buildParentNoticeDocHtml(cData, cfg, advisor) {
+  const { docNo, docDate } = ensureDocNo(cData.case_id, 'parent');
+  const meetingDate = cData.meeting_date ? formatThaiDateLong(cData.meeting_date) : '...........................................';
+  const meetingTime = cData.meeting_time || '........................';
+  const meetingLoc = cData.meeting_location || '...........................................';
+
+  const body = `
+    <div class="garuda">🦁</div>
+    <div class="header">${cfg.school_name}</div>
+    <div class="header-sub">${cfg.school_name}</div>
+
+    <div class="meta">
+      <div>ที่ ${docNo}</div>
+      <div>${formatThaiDateLong(docDate)}</div>
+    </div>
+
+    <div><strong>เรื่อง</strong> ขอเชิญประชุมผู้ปกครองเพื่อหาแนวทางแก้ไขพฤติกรรมนักเรียน</div>
+    <div><strong>เรียน</strong> ผู้ปกครองของ ${cData.student_name}</div>
+
+    <div class="indent">
+      ด้วย${cfg.school_name} ได้ติดตามพฤติกรรมของ <strong>${cData.student_name}</strong> ชั้น ${cData.classroom_name} เลขประจำตัว ${cData.student_id} อย่างต่อเนื่อง พบว่า นักเรียนมีผลการประเมินความประพฤติอยู่ในกลุ่ม <strong>"ใกล้ชิด"</strong> ต่อเนื่องกันหลายสัปดาห์ และได้ผ่านกระบวนการลงโทษตามระเบียบกระทรวงศึกษาธิการ ว่าด้วยการลงโทษนักเรียนและนักศึกษา พ.ศ. 2548 แล้ว คือ
+    </div>
+
+    <div style="margin: 8px 0; padding-left: 1cm;">
+      <div>1. หนังสือตักเตือน เลขที่ ${cData.warn_doc_no || '.........'} ลงวันที่ ${cData.warn_date ? formatThaiDateLong(cData.warn_date) : '.........'}</div>
+      <div>2. บันทึกทัณฑ์บน เลขที่ ${cData.bond_doc_no || '.........'} ลงวันที่ ${cData.bond_date ? formatThaiDateLong(cData.bond_date) : '.........'}</div>
+      <div>3. คำสั่งมอบหมายกิจกรรม เลขที่ ${cData.activity_doc_no || '.........'} ลงวันที่ ${cData.activity_date ? formatThaiDateLong(cData.activity_date) : '.........'}</div>
+    </div>
+
+    <div class="indent">
+      แต่นักเรียนยังไม่สามารถดำเนินการตามเงื่อนไขได้สำเร็จ โรงเรียนจึงขอเชิญท่านเข้าร่วมประชุมเพื่อหาแนวทางแก้ไขร่วมกัน
+    </div>
+
+    <div style="margin: 12px 0; padding-left: 1cm;">
+      <div><strong>วันประชุม:</strong> ${meetingDate}</div>
+      <div><strong>เวลา:</strong> ${meetingTime}</div>
+      <div><strong>สถานที่:</strong> ${meetingLoc}</div>
+    </div>
+
+    <div class="indent">
+      จึงเรียนมาเพื่อโปรดเข้าร่วมประชุมตามวันและเวลาดังกล่าว หากไม่สามารถมาได้ กรุณาติดต่อครูที่ปรึกษา ${advisor} เพื่อนัดหมายใหม่
+    </div>
+
+    <div class="indent">ขอแสดงความนับถือ</div>
+
+    <div style="text-align: right; margin-top: 40px;">
+      <div>ลงชื่อ .....................................................</div>
+      <div>( ${cfg.director_name} )</div>
+      <div>${cfg.director_position}</div>
+      <div>${cfg.school_name}</div>
+    </div>
+
+    <div class="cut-line"></div>
+
+    <div style="text-align: center; font-weight: bold; font-size: 18pt; margin: 20px 0;">✂️ ใบตอบรับ</div>
+
+    <div style="text-align: right; margin-bottom: 10px;">
+      เขียนที่ .........................................<br>
+      วันที่ ......... / ......... / .........
+    </div>
+
+    <div style="margin: 8px 0;"><strong>เรื่อง</strong> ตอบรับหนังสือเชิญประชุม</div>
+    <div style="margin: 8px 0;"><strong>เรียน</strong> ผู้อำนวยการ${cfg.school_name}</div>
+
+    <div class="indent">
+      ตามที่โรงเรียนได้มีหนังสือที่ ${docNo} ลงวันที่ ${formatThaiDateLong(docDate)} ขอเชิญประชุมเรื่องพฤติกรรมของ ${cData.student_name} นั้น
+    </div>
+
+    <div class="indent">
+      ข้าพเจ้า ..................................................... ผู้ปกครองของ ${cData.student_name} ได้รับหนังสือแล้ว และ
+    </div>
+
+    <div style="margin: 8px 0; padding-left: 1cm;">
+      <div>☐ ยินดีเข้าร่วมประชุมตามวันและเวลาดังกล่าว</div>
+      <div>☐ ไม่สามารถเข้าร่วมได้ เพราะ ............................................ จะติดต่อนัดหมายใหม่</div>
+    </div>
+
+    <div style="text-align: right; margin-top: 30px;">
+      <div>ลงชื่อ ..................................................... ผู้ปกครอง</div>
+      <div>( ..................................................... )</div>
+      <div>วันที่ ......... / ......... / .........</div>
+    </div>
+  `;
+  return buildDocWrap('หนังสือแจ้งผู้ปกครอง', body);
+}
+
+function ensureDocNo(caseId, docType) {
+  const sheet = getDisciplineSheet('CASES');
+  const data = sheet.getDataRange().getValues();
+  const idx = data.slice(1).findIndex(r => String(r[0]) === caseId) + 2;
+  if (idx <= 1) return { docNo: '', docDate: '' };
+
+  const row = data[idx - 1];
+  const colMap = { warning: [8, 9], bond: [10, 11], activity: [14, 15], parent: [16, 17] };
+  const [noCol, dateCol] = colMap[docType] || [8, 9];
+
+  let docNo = String(row[noCol] || '').trim();
+  let docDate = formatDateStr(row[dateCol]);
+
+  if (!docNo) {
+    const year = new Date().getFullYear() + 543;
+    docNo = `ศธ 04201/${String(year).substring(2)}${String(Math.floor(Math.random() * 900) + 100)}`;
+    docDate = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    sheet.getRange(idx, noCol + 1).setValue(docNo);
+    sheet.getRange(idx, dateCol + 1).setValue(docDate);
+  }
+
+  return { docNo: disciplineEscapeHtml(docNo), docDate: disciplineEscapeHtml(docDate) };
+}
+
+// ---------- Master doc getter ----------
+
+function getDisciplineDocHtml(caseId, docType) {
+  try {
+    const res = getDisciplineCaseDetail(caseId);
+    if (res.status !== 'success') throw new Error(res.message);
+
+    const rawCase = res.data.case;
+    if (docType === 'parent' && rawCase.stage !== '4') {
+      throw new Error('หนังสือผู้ปกครองใช้ได้เฉพาะ Stage 4 เท่านั้น');
+    }
+    const safeData = sanitizeDisciplineDocumentData(rawCase, res.data.config, res.data.advisor);
+    const cData = safeData.caseData;
+    const cfg = safeData.config;
+    const advisor = safeData.advisor;
+
+    let html = '';
+    if (docType === 'warning') html = buildWarningDocHtml(cData, cfg, advisor);
+    else if (docType === 'bond') html = buildBondDocHtml(cData, cfg, advisor);
+    else if (docType === 'activity') html = buildActivityDocHtml(cData, cfg, advisor);
+    else if (docType === 'parent') html = buildParentNoticeDocHtml(cData, cfg, advisor);
+    else throw new Error('docType ไม่ถูกต้อง');
+
+    markDocPrinted(caseId, docType);
+    return { status: 'success', data: { html } };
+  } catch (err) {
+    Logger.log('getDisciplineDocHtml error: ' + err.message);
+    return { status: 'error', message: err.toString() };
+  }
+}
+
+/**
+ * บันทึกข้อมูลนัดประชุมผู้ปกครอง (Stage 4)
+ * @param {string} caseId - รหัสเคส
+ * @param {string} dateStr - yyyy-MM-dd
+ * @param {string} timeStr - เช่น "09:00"
+ * @param {string} location - สถานที่ประชุม
+ */
+/** Save Stage 4 appointment metadata; no guardian contact is sent. */
+function saveMeetingMeta(caseId, dateStr, timeStr, location) {
+  try {
+    if (!caseId) return { status: 'error', message: 'ไม่พบ caseId' };
+
+    const sheet = getDisciplineSheet('CASES');
+    const data = sheet.getDataRange().getValues();
+    const idx = data.slice(1).findIndex(r => String(r[0]) === caseId) + 2;
+    if (idx <= 1) return { status: 'error', message: 'ไม่พบเคสในระบบ' };
+
+    const currentStage = String(data[idx - 1][5] || '');
+    if (currentStage !== '4') {
+      return { status: 'error', message: 'การนัดประชุมใช้ได้เฉพาะ Stage 4 (แจ้งผู้ปกครอง) เท่านั้น' };
+    }
+
+    const safeDate = String(dateStr || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(safeDate)) {
+      return { status: 'error', message: 'วันที่ประชุมไม่ถูกต้อง' };
+    }
+    const parsedDate = new Date(safeDate + 'T00:00:00Z');
+    if (isNaN(parsedDate.getTime()) || parsedDate.toISOString().substring(0, 10) !== safeDate) {
+      return { status: 'error', message: 'วันที่ประชุมไม่ถูกต้อง' };
+    }
+    const safeTime = String(timeStr || '').trim().substring(0, 20);
+    const safeLoc = String(location || '').trim().substring(0, 200);
+    if (!safeTime) return { status: 'error', message: 'กรุณาระบุเวลาประชุม' };
+    if (!safeLoc) return { status: 'error', message: 'กรุณาระบุสถานที่ประชุม' };
+
+    // อัปเดตคอลัมน์ 23 (meeting_date), 24 (meeting_time), 25 (meeting_location), 37 (updated_at)
+    sheet.getRange(idx, 23).setValue(safeDate);
+    sheet.getRange(idx, 24).setValue(safeTime);
+    sheet.getRange(idx, 25).setValue(safeLoc);
+    sheet.getRange(idx, 37).setValue(new Date().toISOString());
+
+    addDisciplineLog(
+      caseId, 'meeting_scheduled', '', '',
+      'system',
+      `นัดประชุม ${safeDate || '?'} ${safeTime || ''} @ ${safeLoc || '?'}`
+    );
+
+    return {
+      status: 'success',
+      message: 'บันทึกการนัดประชุมสำเร็จ',
+      data: { meeting_date: safeDate, meeting_time: safeTime, meeting_location: safeLoc }
+    };
+  } catch (err) {
+    Logger.log('saveMeetingMeta error: ' + err.message);
+    return { status: 'error', message: err.toString() };
+  }
+}
