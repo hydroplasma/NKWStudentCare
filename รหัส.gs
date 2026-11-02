@@ -955,21 +955,6 @@ const CLEANING_HEADERS = {
 
 function getCleaningConfig() {
   try {
-    const classrooms = getClassroomsList(); // หรือฟังก์ชันดึงรายชื่อห้องของคุณ
-    const students = getAllStudentsGroupedByClassroom(); // ฟังก์ชันดึงรายชื่อนักเรียนจัดกลุ่มตามห้อง
-    const criteria = getCleaningCriteria(); // เกณฑ์การประเมิน
-
-    return createResponse('success', 'Config loaded successfully', {
-      classrooms: classrooms,
-      students: students,
-      criteria: criteria
-    });
-  } catch (error) {
-    return createResponse('error', 'Failed to load config: ' + error.message, null, error);
-  }
-}
-function getCleaningConfig() {
-  try {
     // 1. ดึงข้อมูลห้องเรียนทั้งหมดโดยอาศัยฟังก์ชัน getClassrooms เดิมในระบบ
     let classrooms = [];
     try {
@@ -1414,132 +1399,7 @@ function setupCleaningSheets() {
 
   console.log('✅ สร้างชีตและหัวตารางสำเร็จ!');
 }
-// ฟังก์ชันดึงตารางสอนรายวิชาของครูในวันนี้ หรือตามที่เลือก
-function getTeacherSchedule(teacherEmail, targetDate) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Timetable"); // สมมติว่ามีชีตตารางสอน
-  if (!sheet) return [];
-  
-  var data = sheet.getDataRange().getValues();
-  var headers = data[0];
-  var result = [];
-  
-  // แปลงวันเป็นชื่อวัน (เช่น จันทร์, อังคาร)
-  var dateObj = targetDate ? new Date(targetDate) : new Date();
-  var days = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์"];
-  var dayName = days[dateObj.getDay()];
-  
-  for (var i = 1; i < data.length; i++) {
-    var row = data[i];
-    // สมมติโครงสร้างคอลัมน์: [TimetableID, DayOfWeek, Period, SubjectCode, SubjectName, TeacherEmail, GradeLevel, Room]
-    var rowDay = row[1];
-    var rowEmail = row[5];
-    
-    if (rowDay === dayName && rowEmail === teacherEmail) {
-      result.push({
-        timetableId: row[0],
-        period: row[2],
-        subjectCode: row[3],
-        subjectName: row[4],
-        gradeLevel: row[6],
-        room: row[7]
-      });
-    }
-  }
-  return result;
-}
 
-/**
- * บันทึก/แก้ไขผลการเข้าเรียน
- * - ถ้ามีแถวเดิมของ (วันที่ + วิชา + ห้อง) อยู่ → ลบทิ้งก่อนแล้วเพิ่มใหม่
- * - จึงแก้ไขย้อนหลังได้โดยไม่มีข้อมูลซ้ำ
- */
-function saveSubjectAttendance(jsonPayload) {
-  try {
-    var payload = JSON.parse(jsonPayload);
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var sheet = ss.getSheetByName("Attendance_Subjects");
-
-    if (!sheet) {
-      sheet = ss.insertSheet("Attendance_Subjects");
-      sheet.appendRow([
-        "Timestamp", "Date", "SubjectCode", "SubjectName", "TeacherEmail",
-        "GradeLevel", "Room", "StudentID", "StudentName", "Status", "Note"
-      ]);
-    }
-
-    var lock = LockService.getScriptLock();
-    if (!lock.tryLock(10000)) {
-      return { status: "error", message: "ระบบกำลังทำงานอยู่ กรุณาลองใหม่" };
-    }
-
-    try {
-      var targetDate  = String(payload.date || "").trim();
-      var targetCode  = String(payload.subjectCode || "").trim();
-      var targetName  = String(payload.subjectName || "").trim();
-      var targetGrade = String(payload.gradeLevel || "").trim();
-      var targetRoom  = String(payload.room || "").trim();
-
-      // === 1. ลบแถวเดิมของ (วันที่ + วิชา + ห้อง) ===
-      var data = sheet.getDataRange().getValues();
-      var rowsToDelete = [];
-      for (var i = data.length - 1; i >= 1; i--) {
-        var row = data[i];
-        var rowDate  = formatDateStr(row[1]);
-        var rowCode  = String(row[2] || "").trim();
-        var rowName  = String(row[3] || "").trim();
-        var rowGrade = String(row[5] || "").trim();
-        var rowRoom  = String(row[6] || "").trim();
-
-        var codeMatch = targetCode !== ""
-          ? (rowCode === targetCode)
-          : (rowCode === "" && rowName === targetName);
-
-        if (rowDate === targetDate && codeMatch &&
-            rowGrade === targetGrade && rowRoom === targetRoom) {
-          rowsToDelete.push(i + 1); // 1-indexed
-        }
-      }
-      // ลบจากล่างขึ้นบน เพื่อไม่ให้ index เลื่อน
-      rowsToDelete.forEach(function (rowIdx) { sheet.deleteRow(rowIdx); });
-
-      // === 2. เพิ่มแถวใหม่ ===
-      var timestamp = new Date();
-      var rowsToAdd = [];
-      payload.students.forEach(function (stu) {
-        rowsToAdd.push([
-          timestamp,
-          targetDate,
-          targetCode,
-          targetName,
-          payload.teacherEmail,
-          targetGrade,
-          targetRoom,
-          stu.student_id,
-          stu.name,
-          stu.status,
-          stu.note || ""
-        ]);
-      });
-
-      if (rowsToAdd.length > 0) {
-        sheet.getRange(sheet.getLastRow() + 1, 1, rowsToAdd.length, rowsToAdd[0].length)
-             .setValues(rowsToAdd);
-      }
-
-      return {
-        status: "success",
-        message: rowsToDelete.length > 0
-          ? "อัปเดตผลการเข้าเรียนสำเร็จ"
-          : "บันทึกผลการเข้าเรียนสำเร็จ"
-      };
-    } finally {
-      lock.releaseLock();
-    }
-  } catch (err) {
-    return { status: "error", message: err.toString() };
-  }
-}
 /**
  * Helper: แปลงวันที่ให้เป็น yyyy-MM-dd เสมอ
  */
@@ -1557,7 +1417,7 @@ function formatDateStr(d) {
  */
 function getSubjectAttendanceForEdit(date, subjectCode, subjectName, gradeLevel, room) {
   try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var ss = getSpreadsheet();
     var sheet = ss.getSheetByName("Attendance_Subjects");
     if (!sheet) return { status: "success", data: [] };
 
@@ -1673,7 +1533,7 @@ function getTeacherSubjectSchedule(teacherEmail, targetDate) {
 function saveSubjectAttendance(jsonPayload) {
   try {
     var payload = JSON.parse(jsonPayload);
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var ss = getSpreadsheet();
     var sheet = ss.getSheetByName("Attendance_Subjects");
     
     // ถ้ายังไม่มีชีต ให้สร้างให้อัตโนมัติพร้อมหัวตาราง
@@ -1714,7 +1574,7 @@ function saveSubjectAttendance(jsonPayload) {
 
 // ฟังก์ชันสรุปการเข้าเรียน (ปรับปรุงให้รองรับวิชาที่ไม่มีรหัสวิชา)
 function getSubjectAttendanceSummary(teacherIdentifier, subjectKey) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = getSpreadsheet();
   var sheet = ss.getSheetByName("Attendance_Subjects");
   if (!sheet) return { status: "error", message: "ยังไม่มีข้อมูล" };
   
@@ -1755,7 +1615,7 @@ function getSubjectAttendanceSummary(teacherIdentifier, subjectKey) {
 
 // ฟังก์ชันดึงรายชื่อวิชาทั้งหมดที่ครูสอน (ปรับรูปแบบข้อความตามเงื่อนไขใหม่)
 function getTeacherSubjectsList(teacherIdentifier) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = getSpreadsheet();
   var sheet = ss.getSheetByName("Timetable");
   if (!sheet) return { status: "success", data: [] };
   
@@ -1888,19 +1748,13 @@ function setupSubjectDatabase() {
  */
 function getClassroomStudents(classroomId) {
   try {
-    if (!classroomId) {
-      return { students: [] };
-    }
+    if (!classroomId) return { students: [] };
 
-    // เรียกใช้ getStudents() ที่มีอยู่แล้วในระบบ
-    const res = getStudents([String(classroomId).trim()]);
-    if (!res || res.status !== 'success') {
-      return { students: [] };
-    }
+    const key = String(classroomId).trim();
+    const res = getStudents([key]);
+    if (!res || res.status !== 'success') return { students: [] };
 
-    // getStudents คืนค่าเป็น { classroomId: [student,...] }
-    const students = (res.data && res.data[classroomId]) ? res.data[classroomId] : [];
-
+    const students = (res.data && res.data[key]) ? res.data[key] : [];
     return { students: students };
   } catch (e) {
     Logger.log('Error in getClassroomStudents: ' + e.message);

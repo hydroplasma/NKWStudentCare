@@ -1003,10 +1003,11 @@
                 try {
                     // ป้องกันการทำงานทับซ้อนถ้ารหัสเป็นการเปิดลิงก์แบบใหม่ (เช่นหน้าสถิติ)
                     if ($(this).attr('target') === '_blank') return;
+                    const tabId = $(this).data("tab");
+                    if (!tabId) return;
                     
                     $(".nav-tab").removeClass("active");
                     $(this).addClass("active");
-                    const tabId = $(this).data("tab");
                     $(".tab-content").removeClass("active").hide();
                     $("#" + tabId).addClass("active").show();
                     
