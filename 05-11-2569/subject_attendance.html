@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>เช็คชื่อเข้าเรียนรายวิชา</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/th.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+  <style>
+    body { background-color: #f5f5f5; font-family: 'Sarabun', sans-serif; }
+    .app-card { background-color: #ffffff; border-radius: 28px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.04); }
+    input[type="text"], select { border-radius: 20px !important; background-color: #f9fafb !important; border: 1px solid #e5e7eb !important; padding: 10px 16px !important; }
+    input[type="text"]:focus, select:focus { background-color: #fff !important; border-color: #2563eb !important; box-shadow: 0 0 0 3px rgba(37,99,235,0.15) !important; outline: none !important; }
+    .btn-save { background: linear-gradient(135deg, #2563eb, #1e40af); color: white; border-radius: 40px; padding: 12px 24px; font-weight: bold; box-shadow: 0 4px 12px rgba(37,99,235,0.3); transition: all 0.2s; border: none; cursor: pointer; }
+    .btn-save:active { transform: scale(0.96); }
+
+    /* ==== Status Radio Buttons ==== */
+    .status-radio-group {
+      display: flex;
+      gap: 6px;
+      justify-content: center;
+      flex-wrap: nowrap;
+    }
+    .status-radio { display: none; }
+    .status-label {
+      padding: 7px 16px;
+      border-radius: 40px;
+      font-size: 13px;
+      font-weight: 700;
+      border: 2px solid #e5e7eb;
+      background: #f9fafb;
+      color: #6b7280;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      user-select: none;
+      white-space: nowrap;
+      min-width: 56px;
+      text-align: center;
+      display: inline-block;
+    }
+    .status-label:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    .status-radio:checked + .status-label[data-status="มา"]   { background: #22c55e; color: #fff; border-color: #22c55e; box-shadow: 0 2px 8px rgba(34,197,94,0.35); }
+    .status-radio:checked + .status-label[data-status="ขาด"]  { background: #ef4444; color: #fff; border-color: #ef4444; box-shadow: 0 2px 8px rgba(239,68,68,0.35); }
+    .status-radio:checked + .status-label[data-status="ลา"]   { background: #3b82f6; color: #fff; border-color: #3b82f6; box-shadow: 0 2px 8px rgba(59,130,246,0.35); }
+    .status-radio:checked + .status-label[data-status="สาย"]  { background: #eab308; color: #fff; border-color: #eab308; box-shadow: 0 2px 8px rgba(234,179,8,0.35); }
+    .status-radio:checked + .status-label[data-status="ป่วย"] { background: #a855f7; color: #fff; border-color: #a855f7; box-shadow: 0 2px 8px rgba(168,85,247,0.35); }
+
+    @media (max-width: 640px) {
+      .status-label { padding: 6px 10px; font-size: 11px; min-width: 44px; }
+      .status-radio-group { gap: 4px; }
+    }
+  </style>
+</head>
+<body class="p-4">
+  <div class="max-w-4xl mx-auto">
+    <div class="app-card p-6 mb-4 text-center">
+      <h1 class="text-xl font-bold text-gray-800">📚 ระบบเช็คชื่อเข้าเรียนรายวิชา</h1>
+    </div>
+
+    <!-- เลือกวันที่และคาบสอน -->
+    <div class="app-card p-6 mb-4 grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+      <div>
+        <label class="block text-sm font-semibold text-gray-700 mb-1">📅 วันที่เช็คชื่อ</label>
+        <input type="text" id="subject-date" class="w-full bg-white cursor-pointer" placeholder="คลิกเพื่อเลือกวันที่">
+      </div>
+      <div>
+        <label class="block text-sm font-semibold text-gray-700 mb-1">⏰ เลือกคาบสอน / วิชา</label>
+        <select id="subject-schedule-select" class="w-full bg-white font-medium">
+          <option value="">-- กรุณาเลือกคาบสอน --</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- ตารางรายชื่อนักเรียน -->
+    <div id="subject-attendance-container" class="app-card p-6 hidden">
+      <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+        <div>
+          <h3 id="class-info-title" class="font-bold text-gray-800"></h3>
+          <p id="class-info-sub" class="text-xs text-gray-500"></p>
+          <p id="existing-hint" class="text-xs text-emerald-600 font-semibold mt-1 hidden">✏️ มีการบันทึกไว้แล้ว — แก้ไขได้เลย</p>
+        </div>
+        <button id="mark-all-present" class="bg-emerald-50 text-emerald-600 border border-emerald-200 px-4 py-2 rounded-xl text-xs font-bold active:scale-95">✓ มาทั้งหมด</button>
+      </div>
+
+      <div class="overflow-x-auto rounded-2xl border border-gray-100 mb-4">
+        <table class="w-full border-collapse text-sm">
+          <thead>
+            <tr class="bg-blue-700 text-white">
+              <th class="p-3 text-center w-16">เลขที่</th>
+              <th class="p-3 text-left">ชื่อ-สกุล</th>
+              <th class="p-3 text-center" style="min-width: 320px;">สถานะ</th>
+              <th class="p-3 text-left w-44">หมายเหตุ</th>
+            </tr>
+          </thead>
+          <tbody id="subject-student-tbody" class="bg-white"></tbody>
+        </table>
+      </div>
+
+      <button id="save-subject-attendance-btn" class="w-full btn-save shadow-lg shadow-blue-500/20">💾 บันทึกผลการเข้าเรียน</button>
+    </div>
+  </div>
+
+  <script>
+        // ✅ ฟังก์ชันสร้างวันที่แบบ Timezone ท้องถิ่น
+    function getLocalDateStr(d) {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    let currentScheduleList = [];
+    let selectedSchedule = null;
+    let currentDateStr = '';
+    let currentRequestId = 0;   // ✅ track request สำหรับ stale response
+
+    $(document).ready(function() {
+      // ✅ อ่าน URL params (date, subject) — มาจาก weekly summary
+      const params = new URLSearchParams(window.location.search);
+      const preselectDate = params.get('date');
+      const preselectSubject = params.get('subject');
+      const targetDate = preselectDate || getLocalDateStr(new Date());
+      currentDateStr = targetDate;
+
+      flatpickr("#subject-date", {
+        dateFormat: "Y-m-d",
+        defaultDate: targetDate,
+        locale: "th",
+        allowInput: true,
+        onChange: function(selectedDates, dateStr) {
+          if (!dateStr) return;
+          // ✅ allow reload if list empty
+          if (dateStr === currentDateStr && currentScheduleList.length > 0) return;
+          currentDateStr = dateStr;
+          loadTeacherSchedule(dateStr, 0, null);
+        }
+      });
+
+      // ✅ โหลดครั้งแรก + preselect ถ้ามี
+      loadTeacherSchedule(targetDate, 0, preselectSubject);
+    });
+
+    function formatDateThai(dateStr) {
+      try {
+        if (!dateStr) return '';
+        const months = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+        const [y,m,d] = dateStr.split('-');
+        return `${parseInt(d)} ${months[parseInt(m)-1]} ${parseInt(y)+543}`;
+      } catch(e) { return dateStr; }
+    }
+
+    // === 1. โหลดตารางสอนตามวันที่ + Loading + Retry + Request ID ===
+    function loadTeacherSchedule(dateStr, retryCount, preselectSubject) {
+      retryCount = retryCount || 0;
+      const requestId = ++currentRequestId;
+
+      const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
+      const teacherEmail = teacher.email || teacher.username;
+
+      console.log(`[loadTeacherSchedule] id=${requestId} date=${dateStr} retry=${retryCount} email=${teacherEmail}`);
+
+      if (!teacherEmail) {
+        Swal.fire('ผิดพลาด', 'ไม่พบข้อมูลครูผู้ใช้ระบบ', 'error');
+        return;
+      }
+
+      const select = $('#subject-schedule-select');
+      select.html('<option value="">-- กำลังโหลด... --</option>');
+      $('#subject-attendance-container').addClass('hidden');
+      selectedSchedule = null;
+      currentScheduleList = [];
+
+      Swal.fire({
+        title: retryCount > 0 ? `กำลังลองใหม่ (ครั้งที่ ${retryCount + 1})...` : 'กำลังโหลดตารางสอน...',
+        html: `<div style="color:#666;font-size:14px;margin-top:8px;">วันที่ ${formatDateThai(dateStr)}</div>`,
+        allowOutsideClick: false,
+        allowEscapeKey: false,
+        didOpen: () => Swal.showLoading()
+      });
+
+      // ✅ Timeout guard 25 วินาที (ก่อน Apps Script จะตัดที่ 30 วิ)
+      const timeoutId = setTimeout(() => {
+        if (requestId !== currentRequestId) return;
+        if (Swal.isVisible()) {
+          Swal.close();
+          handleScheduleTimeout(dateStr, retryCount, 'Timeout (25s)', preselectSubject);
+        }
+      }, 25000);
+
+      google.script.run
+        .withSuccessHandler(function(res) {
+          clearTimeout(timeoutId);
+
+          // ✅ ignore stale response
+          if (requestId !== currentRequestId) {
+            console.warn(`[loadTeacherSchedule] Ignoring STALE response id=${requestId} (current=${currentRequestId})`);
+            return;
+          }
+
+          console.log(`[loadTeacherSchedule] Response id=${requestId}:`, res);
+          Swal.close();
+
+          // ✅ handle null/undefined
+          if (res === null || res === undefined) {
+            if (retryCount < 2) {
+              console.log(`Auto-retry ${retryCount + 1}/2 in 1s...`);
+              setTimeout(() => {
+                if (requestId === currentRequestId) loadTeacherSchedule(dateStr, retryCount + 1, preselectSubject);
+              }, 1000);
+              return;
+            }
+            select.html('<option value="">-- Server ไม่ตอบสนอง --</option>');
+            handleScheduleTimeout(dateStr, retryCount, 'ไม่ได้รับข้อมูล', preselectSubject);
+            return;
+          }
+
+          if (typeof res === 'string') {
+            console.error('Server returned string:', res.substring(0, 200));
+            select.html('<option value="">-- Server ส่งข้อมูลผิดรูปแบบ --</option>');
+            Swal.fire({
+              icon: 'error',
+              title: 'ข้อมูลผิดรูปแบบ',
+              html: `<div class="text-xs text-left bg-gray-100 p-2 rounded max-h-40 overflow-y-auto">${res.substring(0, 300)}</div>`,
+              confirmButtonText: 'รับทราบ'
+            });
+            return;
+          }
+
+          if (res.status === 'success') {
+            currentScheduleList = res.data || [];
+            select.empty().append('<option value="">-- กรุณาเลือกคาบสอน --</option>');
+
+            if (currentScheduleList.length === 0) {
+              const hint = res.message ? ` (${res.message})` : '';
+              select.html(`<option value="">-- ไม่มีตารางสอนในวันนี้${hint} --</option>`);
+              return;
+            }
+
+            let preselectIndex = -1;
+            currentScheduleList.forEach((sch, index) => {
+              let codeText = sch.subjectCode ? ` (${sch.subjectCode})` : '';
+              let roomText = "";
+              if (sch.gradeLevel && sch.room) roomText = ` - ${sch.gradeLevel}/${sch.room}`;
+              else if (sch.gradeLevel || sch.room) roomText = ` - ${sch.gradeLevel || sch.room}`;
+              select.append(`<option value="${index}">คาบที่ ${sch.period} : ${sch.subjectName}${codeText}${roomText}</option>`);
+
+              // ✅ หา index ที่ตรงกับ preselect (เฉพาะครั้งแรก)
+              if (preselectSubject && preselectIndex === -1 && sch.subjectCode === preselectSubject) {
+                preselectIndex = index;
+              }
+            });
+
+            // ✅ Auto-select ถ้ามี preselect
+            if (preselectIndex >= 0) {
+              select.val(String(preselectIndex)).trigger('change');
+            }
+
+            console.log(`✅ [loadTeacherSchedule] Rendered ${currentScheduleList.length} periods for ${dateStr}`);
+          } else {
+            const errMsg = res.message || 'response ไม่ถูกต้อง';
+            select.html(`<option value="">-- โหลดไม่สำเร็จ: ${errMsg} --</option>`);
+            Swal.fire('ผิดพลาด', 'ไม่สามารถโหลดตารางสอนได้: ' + errMsg, 'error');
+          }
+        })
+        .withFailureHandler(function(err) {
+          clearTimeout(timeoutId);
+          if (requestId !== currentRequestId) return;
+
+          console.error('[loadTeacherSchedule] FAILED:', err);
+          Swal.close();
+
+          if (retryCount < 1) {
+            setTimeout(() => {
+              if (requestId === currentRequestId) loadTeacherSchedule(dateStr, retryCount + 1, preselectSubject);
+            }, 1000);
+            return;
+          }
+
+          const msg = (err && err.message) ? err.message : 'Unknown error';
+          select.html(`<option value="">-- โหลดไม่สำเร็จ: ${msg} --</option>`);
+          Swal.fire('ผิดพลาด', 'ไม่สามารถโหลดตารางสอนได้: ' + msg, 'error');
+        })
+        .getTeacherSubjectSchedule(teacherEmail, dateStr);
+    }
+
+    // ✅ Timeout handler — แจ้ง error + auto-retry
+    function handleScheduleTimeout(dateStr, retryCount, errMsg, preselectSubject) {
+      const select = $('#subject-schedule-select');
+      select.html('<option value="">-- Server ไม่ตอบสนอง --</option>');
+
+      if (retryCount < 1) {
+        Swal.fire({
+          icon: 'warning',
+          title: 'Server ตอบสนองช้า',
+          html: `
+            <div class="text-sm">
+              <p>ครั้งแรกใช้เวลานานเกิน 25 วินาที</p>
+              <p class="text-xs text-gray-500 mt-1">${errMsg || 'Apps Script กำลัง cold start — ลองอีกครั้งจะเร็วขึ้น'}</p>
+            </div>
+          `,
+          timer: 2000,
+          showConfirmButton: false
+        }).then(() => {
+          loadTeacherSchedule(dateStr, retryCount + 1, preselectSubject);
+        });
+      } else {
+        Swal.fire({
+          icon: 'error',
+          title: 'ไม่สามารถโหลดได้',
+          html: `
+            <div class="text-sm text-left">
+              <p>ลองแล้ว ${retryCount + 1} ครั้ง ยังไม่สำเร็จ</p>
+              <p class="text-xs text-gray-500 mt-2">สาเหตุที่เป็นไปได้:</p>
+              <ul class="text-xs list-disc pl-5 mt-1 text-gray-600">
+                <li>Apps Script quota เต็มวันนี้</li>
+                <li>Timetable มีข้อมูลใหญ่มาก</li>
+                <li>Network ขาดการเชื่อมต่อ</li>
+              </ul>
+              <p class="text-xs mt-2"><b>แนะนำ:</b> รอ 1-2 นาที แล้วกดลองใหม่</p>
+            </div>
+          `,
+          confirmButtonText: 'ลองอีกครั้ง',
+          showCancelButton: true,
+          cancelButtonText: 'ปิด'
+        }).then(r => {
+          if (r.isConfirmed) loadTeacherSchedule(dateStr, 0, preselectSubject);
+        });
+      }
+    }
+
+    // === 2. เลือกคาบสอน → โหลดนักเรียน + ข้อมูลที่เคยบันทึก ===
+    $('#subject-schedule-select').change(function() {
+      const index = $(this).val();
+      if (index === '') {
+        $('#subject-attendance-container').addClass('hidden');
+        selectedSchedule = null;
+        return;
+      }
+      selectedSchedule = currentScheduleList[index];
+      loadClassroomStudents(selectedSchedule, currentDateStr);
+    });
+
+    function loadClassroomStudents(sch, dateStr) {
+      Swal.fire({
+        title: 'กำลังโหลดรายชื่อนักเรียน...',
+        allowOutsideClick: false,
+        allowEscapeKey: false,
+        didOpen: () => Swal.showLoading()
+      });
+
+      // ขั้นที่ 1: ดึงรายชื่อนักเรียน
+      google.script.run
+        .withSuccessHandler(function(resStudents) {
+          // ขั้นที่ 2: ดึงข้อมูลที่เคยบันทึกไว้ (ถ้ามี)
+          google.script.run
+            .withSuccessHandler(function(resAtt) {
+              Swal.close();
+              renderStudentTable(sch, resStudents, resAtt, dateStr);
+            })
+            .withFailureHandler(function() {
+              Swal.close();
+              renderStudentTable(sch, resStudents, null, dateStr);
+            })
+            .getSubjectAttendanceForEdit(
+              dateStr, sch.subjectCode, sch.subjectName, sch.gradeLevel, sch.room
+            );
+        })
+        .withFailureHandler(function(err) {
+          Swal.close();
+          Swal.fire('ผิดพลาด', 'ไม่สามารถโหลดรายชื่อนักเรียนได้: ' + err.message, 'error');
+        })
+        .getClassroomStudents(sch.classroomId);
+    }
+
+    // === 3. วาดตารางด้วย Radio Button ===
+    function renderStudentTable(sch, resStudents, resAtt, dateStr) {
+      const students = (resStudents && resStudents.students) || [];
+
+      const existingMap = {};
+      let hasExisting = false;
+      if (resAtt && resAtt.status === 'success' && Array.isArray(resAtt.data)) {
+        resAtt.data.forEach(r => {
+          existingMap[String(r.student_id)] = { status: r.status, note: r.note || '' };
+          hasExisting = true;
+        });
+      }
+
+      let codeText = sch.subjectCode ? ` (${sch.subjectCode})` : '';
+      $('#class-info-title').text(`📋 วิชา ${sch.subjectName}${codeText}`);
+
+      let roomText = "";
+      if (sch.gradeLevel && sch.room) roomText = `${sch.gradeLevel}/${sch.room}`;
+      else if (sch.gradeLevel || sch.room) roomText = `${sch.gradeLevel || sch.room}`;
+
+      $('#class-info-sub').text(`ห้อง: ${roomText} | คาบที่: ${sch.period} | วันที่: ${formatDateThai(dateStr)}`);
+      $('#existing-hint').toggleClass('hidden', !hasExisting);
+
+      const tbody = $('#subject-student-tbody');
+      tbody.empty();
+
+      if (students.length === 0) {
+        tbody.append('<tr><td colspan="4" class="text-center p-6 text-gray-400">ไม่พบรายชื่อนักเรียน</td></tr>');
+        $('#subject-attendance-container').removeClass('hidden');
+        return;
+      }
+
+      // ✅ 5 statuses (มา / ขาด / ลา / สาย / ป่วย)
+      const statuses = ['มา', 'ขาด', 'ลา', 'สาย', 'ป่วย'];
+
+      students.forEach((s, idx) => {
+        const existing = existingMap[String(s.student_id)];
+        const currentStatus = existing ? existing.status : 'มา';
+        const currentNote = existing ? existing.note : '';
+        const sid = s.student_id;
+
+        const radios = statuses.map(st => {
+          const checked = st === currentStatus ? 'checked' : '';
+          return `
+            <input type="radio" class="status-radio"
+                   name="status_${sid}" id="st_${sid}_${st}"
+                   value="${st}" data-student-id="${sid}" ${checked}>
+            <label for="st_${sid}_${st}" class="status-label" data-status="${st}">${st}</label>
+          `;
+        }).join('');
+
+        tbody.append(`
+          <tr class="border-b border-gray-50 hover:bg-blue-50/40">
+            <td class="p-3 text-center text-gray-600">${s.no || (idx + 1)}</td>
+            <td class="p-3 text-gray-800 font-medium">${s.name}</td>
+            <td class="p-3 text-center">
+              <div class="status-radio-group">${radios}</div>
+            </td>
+            <td class="p-3">
+              <input type="text" class="student-attend-note w-full text-xs"
+                     data-student-id="${sid}" placeholder="หมายเหตุ" value="${currentNote}">
+            </td>
+          </tr>
+        `);
+      });
+
+      $('#subject-attendance-container').removeClass('hidden');
+    }
+
+    // === 4. มาทั้งหมด ===
+    $('#mark-all-present').click(function() {
+      $('.status-radio[value="มา"]').prop('checked', true);
+    });
+
+    // === 5. บันทึก (แก้ไขย้อนหลังได้) ===
+        $('#save-subject-attendance-btn').click(function() {
+      if (!selectedSchedule) {
+        Swal.fire('กรุณาเลือกคาบสอน', '', 'warning');
+        return;
+      }
+
+      const date = $('#subject-date').val() || currentDateStr;
+      const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
+      const teacherEmail = teacher.email || teacher.username;
+
+      const studentsPayload = [];
+      const seen = new Set();
+
+      // ดึงค่าจากปุ่มที่ถูกเลือก
+      $('.student-attend-status').each(function() {
+        const sid = String($(this).data('student-id'));
+        if (seen.has(sid)) return;
+        seen.add(sid);
+
+        const status = $(this).val();
+        const row = $(this).closest('tr');
+        const note = row.find('.student-attend-note').val() || '';
+        const rowTexts = row.find('td');
+const studentName = rowTexts.eq(1).text().trim(); 
+
+        studentsPayload.push({ student_id: sid, name: studentName, status, note });
+      });
+
+      if (studentsPayload.length === 0) {
+        Swal.fire('ไม่มีข้อมูลนักเรียน', 'กรุณาโหลดรายชื่อก่อนบันทึก', 'warning');
+        return;
+      }
+
+      const payload = {
+        date: date,
+        subjectCode: selectedSchedule.subjectCode,
+        subjectName: selectedSchedule.subjectName,
+        teacherEmail: teacherEmail,
+        gradeLevel: selectedSchedule.gradeLevel,
+        room: selectedSchedule.room,
+        students: studentsPayload
+      };
+
+      Swal.fire({
+        title: 'กำลังบันทึก...',
+        allowOutsideClick: false,
+        allowEscapeKey: false,
+        didOpen: () => Swal.showLoading()
+      });
+
+      google.script.run
+        .withSuccessHandler(function(res) {
+          console.log('Save Response:', res); // ดูใน Console ว่าหลังบ้านตอบอะไรกลับมา
+          
+          if (res && res.status === 'success') {
+            Swal.fire({
+              title: 'สำเร็จ',
+              html: `${res.message || 'บันทึกเรียบร้อย'}<br><small class="text-gray-500">${formatDateThai(date)}</small>`,
+              icon: 'success',
+              timer: 2000,
+              showConfirmButton: false
+            }).then(() => {
+              // รีเฟรชข้อมูลในตารางใหม่เพื่อให้เห็นสถานะล่าสุด
+              if (selectedSchedule) loadClassroomStudents(selectedSchedule, date);
+            });
+          } else {
+            Swal.close();
+            Swal.fire('เกิดข้อผิดพลาด', res ? res.message : 'ไม่สามารถบันทึกได้', 'error');
+          }
+        })
+        .withFailureHandler(function(err) {
+          console.error('Save Error:', err);
+          Swal.close();
+          Swal.fire('ผิดพลาด', err.message, 'error');
+        })
+        .saveSubjectAttendance(JSON.stringify(payload));
+    });
+  </script>
+</body>
+</html>

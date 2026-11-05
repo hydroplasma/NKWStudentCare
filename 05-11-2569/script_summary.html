@@ -1,0 +1,1996 @@
+<script>
+// ═══════════════════════════════════════════════════════════════
+// SCRIPT_SUMMARY.HTML — Stats, Risk Assessment, Discipline
+// Version: Sprint 1-4 Complete (2025-11-03)
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
+// 1. HELPERS
+// ═══════════════════════════════════════════════════════════════
+
+function debounce(fn, wait) {
+  let t;
+  return function() { clearTimeout(t); t = setTimeout(fn, wait); };
+}
+
+function formatThaiDate(ds) {
+  if (!ds) return '';
+  const p = ds.split('-');
+  return `${parseInt(p[2])}/${parseInt(p[1])}/${parseInt(p[0]) + 543}`;
+}
+
+function formatThaiDateLong(ds) {
+  if (!ds) return '...............';
+  const months = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน",
+                  "กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+  const p = ds.split('-');
+  return `${parseInt(p[2])} ${months[parseInt(p[1]) - 1]} ${parseInt(p[0]) + 543}`;
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 2. CLEANING SUMMARY
+// ═══════════════════════════════════════════════════════════════
+
+async function loadCleaningSummary() {
+  try {
+    $("#cleaning-summary-empty").show();
+    $("#cleaning-summary-content").addClass("hidden");
+
+    const today = TODAY;
+    const d = new Date(today);
+    const start = new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0];
+
+    if (!$("#cleaning-summary-start").val()) {
+      $("#cleaning-summary-start").val(start);
+      flatpickr("#cleaning-summary-start", { dateFormat: "Y-m-d", locale: "th", defaultDate: start });
+    }
+    if (!$("#cleaning-summary-end").val()) {
+      $("#cleaning-summary-end").val(today);
+      flatpickr("#cleaning-summary-end", { dateFormat: "Y-m-d", locale: "th", defaultDate: today });
+    }
+
+    if ($("#cleaning-summary-room option").length <= 1) {
+      const cr = await runGoogleScript('getClassrooms', []);
+      if (cr.status === 'success') {
+        cr.data.forEach(c => {
+          $("#cleaning-summary-room").append(`<option value="${c.id}">${c.name}</option>`);
+        });
+      }
+    }
+
+    $("#cleaning-summary-run").off("click").on("click", runCleaningSummary);
+  } catch (error) {
+    console.error('Error in loadCleaningSummary:', error);
+  }
+}
+
+async function runCleaningSummary() {
+  const startDate = $("#cleaning-summary-start").val();
+  const endDate = $("#cleaning-summary-end").val();
+  const classroomId = $("#cleaning-summary-room").val() || "";
+
+  if (!startDate || !endDate) return Swal.fire('แจ้งเตือน', 'กรุณาเลือกช่วงวันที่', 'warning');
+  if (startDate > endDate) return Swal.fire('แจ้งเตือน', 'วันที่เริ่มต้นต้องไม่มากกว่าวันที่สิ้นสุด', 'warning');
+
+  $.LoadingOverlay("show", { text: "กำลังประมวลผล..." });
+  try {
+    const res = await runGoogleScript('getCleaningStats', {
+      startDate, endDate, classroom_id: classroomId
+    });
+    if (res.status !== 'success') throw new Error(res.message);
+
+    renderCleaningSummary(res.data);
+    $("#cleaning-summary-empty").hide();
+    $("#cleaning-summary-content").removeClass("hidden");
+  } catch (error) {
+    console.error('Error:', error);
+    Swal.fire('ผิดพลาด', error.message, 'error');
+  } finally {
+    $.LoadingOverlay("hide");
+  }
+}
+
+function renderCleaningSummary(data) {
+  $("#clean-stat-avg").text((data.avgScore || 0) + '%');
+  $("#clean-stat-total").text((data.scoreDetails || []).length);
+
+  // Top room
+  const roomScores = {};
+  (data.scoreDetails || []).forEach(d => {
+    if (!roomScores[d.classroom_id]) roomScores[d.classroom_id] = [];
+    const [s, m] = String(d.total_score).split('/').map(Number);
+    if (!isNaN(s) && !isNaN(m) && m > 0) roomScores[d.classroom_id].push((s / m) * 100);
+  });
+  let topRoom = '-';
+  let topAvg = 0;
+  for (const room in roomScores) {
+    const avg = roomScores[room].reduce((a, b) => a + b, 0) / roomScores[room].length;
+    if (avg > topAvg) {
+      topAvg = avg;
+      const found = ALL_CLASSROOMS.find(c => c.id === room);
+      topRoom = found ? found.name : room;
+    }
+  }
+  $("#clean-stat-top-room").text(topRoom);
+
+  // Top 5 Students
+  const topTbody = $("#clean-top-students");
+  topTbody.empty();
+  if (!data.topStudents || data.topStudents.length === 0) {
+    topTbody.append('<tr><td colspan="3" class="text-center p-4 text-gray-400">ไม่มีข้อมูล</td></tr>');
+  } else {
+    const nameMap = {};
+    for (const room in (window.CONFIG_STUDENTS || {})) {
+      (window.CONFIG_STUDENTS[room] || []).forEach(s => { nameMap[String(s.student_id)] = s.name; });
+    }
+
+    data.topStudents.forEach((s, i) => {
+      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`;
+      const realName = nameMap[String(s.name)] || s.name;
+      topTbody.append(`
+        <tr class="border-b border-gray-100 hover:bg-blue-50">
+          <td class="p-3 font-semibold text-gray-700">${medal}</td>
+          <td class="p-3 text-gray-800">${escapeHtml(realName)}</td>
+          <td class="p-3 text-center font-bold text-emerald-600">${s.done} ครั้ง</td>
+        </tr>
+      `);
+    });
+  }
+
+  // Details
+  const detailTbody = $("#clean-details-list");
+  detailTbody.empty();
+  if (!data.scoreDetails || data.scoreDetails.length === 0) {
+    detailTbody.append('<tr><td colspan="4" class="text-center p-4 text-gray-400">ไม่มีข้อมูล</td></tr>');
+  } else {
+    data.scoreDetails.forEach(d => {
+      const roomName = (ALL_CLASSROOMS.find(c => c.id === d.classroom_id) || {}).name || d.classroom_id;
+      detailTbody.append(`
+        <tr class="border-b border-gray-100 hover:bg-blue-50">
+          <td class="p-3 text-gray-600">${d.date}</td>
+          <td class="p-3 font-semibold text-gray-800">${escapeHtml(roomName)}</td>
+          <td class="p-3 text-gray-600">${escapeHtml(d.checker)}</td>
+          <td class="p-3 text-center font-bold text-blue-700">${d.total_score}</td>
+        </tr>
+      `);
+    });
+  }
+
+  // Charts + student list
+  renderCleaningCharts(data.studentStats || [], data.scoreDetails || []);
+  renderCleaningStudentList(data.allStudents || data.studentStats || []);
+}
+
+function renderCleaningCharts(studentStats, scoreDetails) {
+  // Pie: ทำ/ไม่ทำ/ลา
+  let done = 0, notDone = 0, leave = 0;
+  (studentStats || []).forEach(s => {
+    done += s.done || 0;
+    notDone += s.not_done || 0;
+    leave += s.leave || 0;
+  });
+
+  const pieCanvas = document.getElementById('clean-pie-chart');
+  if (pieCanvas) {
+    if (window.cleanPieChart) window.cleanPieChart.destroy();
+    window.cleanPieChart = new Chart(pieCanvas.getContext('2d'), {
+      type: 'pie',
+      data: {
+        labels: ['ทำ', 'ไม่ทำ', 'ลา'],
+        datasets: [{
+          data: [done, notDone, leave],
+          backgroundColor: ['#10b981', '#f97316', '#3b82f6']
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'right' }, title: { display: true, text: 'สัดส่วนการทำเวร' } }
+      }
+    });
+  }
+
+  // Bar: คะแนนเฉลี่ยแต่ละห้อง
+  const roomBuckets = {};
+  (scoreDetails || []).forEach(d => {
+    const [s, m] = String(d.total_score).split('/').map(Number);
+    if (isNaN(s) || isNaN(m) || m <= 0) return;
+    if (!roomBuckets[d.classroom_id]) roomBuckets[d.classroom_id] = [];
+    roomBuckets[d.classroom_id].push((s / m) * 100);
+  });
+
+  const roomLabels = [];
+  const roomValues = [];
+  Object.keys(roomBuckets).sort().forEach(rid => {
+    const avg = roomBuckets[rid].reduce((a, b) => a + b, 0) / roomBuckets[rid].length;
+    const found = ALL_CLASSROOMS.find(c => c.id === rid);
+    roomLabels.push(found ? found.name : rid);
+    roomValues.push(avg.toFixed(1));
+  });
+
+  const barCanvas = document.getElementById('clean-bar-chart');
+  if (barCanvas) {
+    if (window.cleanBarChart) window.cleanBarChart.destroy();
+    window.cleanBarChart = new Chart(barCanvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: roomLabels,
+        datasets: [{ label: 'คะแนนเฉลี่ย (%)', data: roomValues, backgroundColor: '#2563eb' }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, title: { display: true, text: 'คะแนนเฉลี่ยแต่ละห้อง' } },
+        scales: { y: { beginAtZero: true, max: 100 } }
+      }
+    });
+  }
+}
+
+function renderCleaningStudentList(students) {
+  const tbody = $("#clean-student-list");
+  tbody.empty();
+
+  if (!students || students.length === 0) {
+    tbody.append('<tr><td colspan="8" class="text-center p-4 text-gray-400">ไม่มีข้อมูล</td></tr>');
+    return;
+  }
+
+  students.forEach(s => {
+    const roomName = (ALL_CLASSROOMS.find(c => c.id === s.classroom_id) || {}).name || s.classroom_id;
+    const safeName = (s.name || '').replace(/'/g, "\\'");
+
+    tbody.append(`
+      <tr class="border-b border-gray-100 hover:bg-blue-50">
+        <td class="p-3 text-center text-gray-600 text-sm">${escapeHtml(roomName)}</td>
+        <td class="p-3 text-center text-gray-600 text-sm">${s.student_id}</td>
+        <td class="p-3 text-gray-800 text-sm font-medium">${escapeHtml(s.name)}</td>
+        <td class="p-3 text-center font-bold text-emerald-600">${s.done}</td>
+        <td class="p-3 text-center font-bold text-rose-600">${s.not_done}</td>
+        <td class="p-3 text-center font-bold text-blue-600">${s.leave}</td>
+        <td class="p-3 text-center font-bold bg-gray-100">${s.total}</td>
+        <td class="p-3 text-center">
+          <button onclick="viewCleaningStudentDetail('${s.student_id}', '${safeName}')"
+                  class="px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-bold hover:bg-blue-200 active:scale-95">
+            👁️
+          </button>
+        </td>
+      </tr>
+    `);
+  });
+}
+
+async function viewCleaningStudentDetail(studentId, studentName) {
+  $("#student-detail-title").text(`🧹 ${studentName}`);
+  $("#student-detail-sub").text(`รหัส: ${studentId} | เขตพื้นที่`);
+  $("#student-detail-modal").css('display', 'flex');
+
+  const tbody = $("#student-detail-tbody");
+  tbody.html('<tr><td colspan="3" class="text-center p-6 text-gray-400">กำลังโหลด...</td></tr>');
+
+  const startDate = $("#cleaning-summary-start").val();
+  const endDate = $("#cleaning-summary-end").val();
+
+  try {
+    const res = await runGoogleScript('getCleaningStudentDetail', studentId, startDate, endDate);
+    tbody.empty();
+
+    if (res.status === 'success' && res.data.length > 0) {
+      const colorMap = {
+        'ทำ': 'bg-emerald-100 text-emerald-800',
+        'ไม่ทำ': 'bg-rose-100 text-rose-800',
+        'ลา': 'bg-blue-100 text-blue-800',
+        'หนีเวร': 'bg-amber-100 text-amber-800'
+      };
+      res.data.forEach(r => {
+        const cls = colorMap[r.status] || 'bg-gray-100 text-gray-800';
+        tbody.append(`
+          <tr class="border-b border-gray-100 hover:bg-blue-50">
+            <td class="p-3 text-gray-700">${r.date}</td>
+            <td class="p-3 text-center">
+              <span class="px-3 py-1 rounded-full text-xs font-bold ${cls}">${r.status}</span>
+            </td>
+            <td class="p-3 text-gray-600 text-sm">${r.role || '—'}</td>
+          </tr>
+        `);
+      });
+    } else {
+      tbody.html('<tr><td colspan="3" class="text-center p-6 text-gray-400">ไม่พบข้อมูล</td></tr>');
+    }
+  } catch (err) {
+    tbody.html(`<tr><td colspan="3" class="text-center p-6 text-rose-500">${err.message}</td></tr>`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 3. SUBJECT SUMMARY V2
+// ═══════════════════════════════════════════════════════════════
+
+let currentSubjectCtx = null;
+
+function initSubjectSummary() {
+  const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
+  const teacherId = teacher.username || teacher.name || "";
+  if (!teacherId) return;
+
+  const today = TODAY;
+  const d = new Date(today);
+  const start = new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0];
+
+  if (!$("#summary-subject-start").val()) {
+    flatpickr("#summary-subject-start", { dateFormat: "Y-m-d", locale: "th", defaultDate: start });
+    flatpickr("#summary-subject-end", { dateFormat: "Y-m-d", locale: "th", defaultDate: today });
+  }
+
+  const select = $("#summary-subject-select");
+  select.html('<option value="">-- กำลังโหลด --</option>');
+
+  google.script.run.withSuccessHandler(function(res) {
+    select.empty().append('<option value="">-- เลือกวิชา --</option>');
+    if (res.status === 'success' && res.data.length > 0) {
+      res.data.forEach(subj => {
+        select.append(`<option value="${subj.key}">${subj.displayName}</option>`);
+      });
+    } else {
+      select.append('<option value="">ไม่พบรายวิชา</option>');
+    }
+  }).getTeacherSubjectsList(teacherId);
+
+  $("#summary-subject-run").off("click").on("click", runSubjectSummaryV2);
+}
+
+async function runSubjectSummaryV2() {
+  const subjectKey = $("#summary-subject-select").val();
+  const startDate = $("#summary-subject-start").val();
+  const endDate = $("#summary-subject-end").val();
+
+  if (!subjectKey) return Swal.fire('แจ้งเตือน', 'กรุณาเลือกวิชา', 'warning');
+  if (!startDate || !endDate) return Swal.fire('แจ้งเตือน', 'กรุณาเลือกช่วงวันที่', 'warning');
+  if (startDate > endDate) return Swal.fire('แจ้งเตือน', 'วันที่เริ่มต้นต้องไม่มากกว่าวันที่สิ้นสุด', 'warning');
+
+  const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
+  const teacherId = teacher.username || teacher.name || "";
+
+  $.LoadingOverlay("show", { text: "กำลังประมวลผล..." });
+  try {
+    const res = await runGoogleScript('getSubjectAttendanceSummaryV2', teacherId, subjectKey, startDate, endDate, null);
+    if (res.status !== 'success') throw new Error(res.message);
+
+    renderSubjectSummaryV2(subjectKey, res.data, startDate, endDate);
+    $("#subject-summary-empty").addClass("hidden");
+    $("#subject-summary-content").removeClass("hidden");
+  } catch (error) {
+    Swal.fire('ผิดพลาด', error.message, 'error');
+  } finally {
+    $.LoadingOverlay("hide");
+  }
+}
+
+function renderSubjectSummaryV2(subjectKey, data, startDate, endDate) {
+  const totals = data.totals || { present: 0, absent: 0, leave: 0, late: 0, sick: 0, total: 0 };
+  const total = totals.total || 1;
+  const pct = (n) => ((n / total) * 100).toFixed(1) + '%';
+
+  $("#subj-card-present").text(totals.present);
+  $("#subj-card-present-pct").text(pct(totals.present));
+  $("#subj-card-absent").text(totals.absent);
+  $("#subj-card-absent-pct").text(pct(totals.absent));
+  $("#subj-card-late").text(totals.late);
+  $("#subj-card-late-pct").text(pct(totals.late));
+  $("#subj-card-leave").text(totals.leave);
+  $("#subj-card-leave-pct").text(pct(totals.leave));
+  $("#subj-card-sick").text(totals.sick);
+  $("#subj-card-sick-pct").text(pct(totals.sick));
+
+  renderSubjectCharts(totals, data.dailyTrend || {});
+
+  $("#subject-summary-title").text(`📋 สรุปรายบุคคล — ${data.students.length} คน (รวม ${totals.total} ครั้ง)`);
+
+  const tbody = $("#subject-summary-tbody").empty();
+
+  if (data.students.length === 0) {
+    tbody.append('<tr><td colspan="11" class="text-center p-6 text-gray-400">ไม่พบข้อมูล</td></tr>');
+  } else {
+    data.students.forEach(s => {
+      const percent = s.total > 0 ? ((s.present / s.total) * 100).toFixed(0) : 0;
+      const gradeRoom = s.gradeLevel + (s.room ? "/" + s.room : "");
+      const percentColor = percent >= 80 ? 'text-emerald-600' : percent >= 50 ? 'text-amber-600' : 'text-rose-600';
+      const safeName = (s.name || "").replace(/'/g, "\\'");
+
+      tbody.append(`
+        <tr class="border-b border-gray-100 hover:bg-blue-50">
+          <td class="p-3 text-center text-gray-600 text-sm">${escapeHtml(gradeRoom)}</td>
+          <td class="p-3 text-center text-gray-600 text-sm">${s.id}</td>
+          <td class="p-3 text-gray-800 text-sm font-medium">${escapeHtml(s.name)}</td>
+          <td class="p-3 text-center font-bold text-emerald-600">${s.present}</td>
+          <td class="p-3 text-center font-bold text-rose-600">${s.absent}</td>
+          <td class="p-3 text-center font-bold text-amber-600">${s.late}</td>
+          <td class="p-3 text-center font-bold text-blue-600">${s.leave}</td>
+          <td class="p-3 text-center font-bold text-purple-600">${s.sick}</td>
+          <td class="p-3 text-center font-bold bg-gray-100">${s.total}</td>
+          <td class="p-3 text-center font-bold ${percentColor}">${percent}%</td>
+          <td class="p-3 text-center">
+            <button onclick="viewStudentDetail('${s.id}', '${safeName}', '${subjectKey}', '${startDate}', '${endDate}')"
+                    class="px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-bold hover:bg-blue-200 active:scale-95">
+              👁️
+            </button>
+          </td>
+        </tr>
+      `);
+    });
+
+    tbody.append(`
+      <tr class="font-bold bg-blue-100">
+        <td colspan="3" class="p-3 text-center">รวมทั้งสิ้น</td>
+        <td class="p-3 text-center text-emerald-700">${totals.present}</td>
+        <td class="p-3 text-center text-rose-700">${totals.absent}</td>
+        <td class="p-3 text-center text-amber-700">${totals.late}</td>
+        <td class="p-3 text-center text-blue-700">${totals.leave}</td>
+        <td class="p-3 text-center text-purple-700">${totals.sick}</td>
+        <td class="p-3 text-center">${totals.total}</td>
+        <td class="p-3 text-center">100%</td>
+        <td></td>
+      </tr>
+    `);
+  }
+
+  currentSubjectCtx = { subjectKey, startDate, endDate };
+}
+
+function renderSubjectCharts(totals, dailyTrend) {
+  const pieCanvas = document.getElementById('subject-pie-chart');
+  if (pieCanvas) {
+    if (window.subjectPieChart) window.subjectPieChart.destroy();
+    window.subjectPieChart = new Chart(pieCanvas.getContext('2d'), {
+      type: 'pie',
+      data: {
+        labels: ['มา', 'ขาด', 'สาย', 'ลา', 'ป่วย'],
+        datasets: [{
+          data: [totals.present, totals.absent, totals.late, totals.leave, totals.sick],
+          backgroundColor: ['#10b981', '#ef4444', '#eab308', '#3b82f6', '#a855f7']
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'right' }, title: { display: true, text: 'สัดส่วนการเข้าเรียน' } }
+      }
+    });
+  }
+
+  const dates = Object.keys(dailyTrend).sort();
+  const present = dates.map(d => dailyTrend[d].present);
+  const others = dates.map(d => dailyTrend[d].absent + dailyTrend[d].leave + dailyTrend[d].late + dailyTrend[d].sick);
+
+  const barCanvas = document.getElementById('subject-bar-chart');
+  if (barCanvas) {
+    if (window.subjectBarChart) window.subjectBarChart.destroy();
+    window.subjectBarChart = new Chart(barCanvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: dates.map(d => { const p = d.split('-'); return `${parseInt(p[2])}/${parseInt(p[1])}`; }),
+        datasets: [
+          { label: 'มา', data: present, backgroundColor: '#10b981', stack: 'total' },
+          { label: 'ขาด/ลา/สาย/ป่วย', data: others, backgroundColor: '#ef4444', stack: 'total' }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'top' }, title: { display: true, text: 'แนวโน้มรายวัน' } },
+        scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } }
+      }
+    });
+  }
+}
+
+async function viewStudentDetail(studentId, studentName, subjectKey, startDate, endDate) {
+  const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
+  const teacherId = teacher.username || teacher.name || "";
+
+  $("#student-detail-title").text(`👁️ ${studentName}`);
+  $("#student-detail-sub").text(`รหัส: ${studentId}`);
+  $("#student-detail-modal").css('display', 'flex');
+
+  const tbody = $("#student-detail-tbody");
+  tbody.html('<tr><td colspan="3" class="text-center p-6 text-gray-400">กำลังโหลด...</td></tr>');
+
+  try {
+    const res = await runGoogleScript('getSubjectStudentDetail', teacherId, subjectKey, studentId, startDate, endDate);
+    tbody.empty();
+
+    if (res.status === 'success' && res.data.length > 0) {
+      const colorMap = {
+        'มา': 'bg-emerald-100 text-emerald-800',
+        'ขาด': 'bg-rose-100 text-rose-800',
+        'สาย': 'bg-amber-100 text-amber-800',
+        'ลา': 'bg-blue-100 text-blue-800',
+        'ป่วย': 'bg-purple-100 text-purple-800'
+      };
+      res.data.forEach(r => {
+        const cls = colorMap[r.status] || 'bg-gray-100 text-gray-800';
+        tbody.append(`
+          <tr class="border-b border-gray-100 hover:bg-blue-50">
+            <td class="p-3 text-gray-700">${r.date}</td>
+            <td class="p-3 text-center">
+              <span class="px-3 py-1 rounded-full text-xs font-bold ${cls}">${r.status}</span>
+            </td>
+            <td class="p-3 text-gray-600 text-sm">${r.note || '—'}</td>
+          </tr>
+        `);
+      });
+    } else {
+      tbody.html('<tr><td colspan="3" class="text-center p-6 text-gray-400">ไม่พบข้อมูล</td></tr>');
+    }
+  } catch (err) {
+    tbody.html(`<tr><td colspan="3" class="text-center p-6 text-rose-500">${err.message}</td></tr>`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 4. ATTENDANCE STATS
+// ═══════════════════════════════════════════════════════════════
+
+function initAttendanceStats() {
+  const today = TODAY;
+  const d = new Date(today);
+  const start = new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0];
+
+  if (!$("#att-stats-start").val()) {
+    flatpickr("#att-stats-start", { dateFormat: "Y-m-d", locale: "th", defaultDate: start });
+    flatpickr("#att-stats-end", { dateFormat: "Y-m-d", locale: "th", defaultDate: today });
+  }
+
+  if ($("#att-stats-period option").length <= 1) {
+    PERIODS.forEach(p => $("#att-stats-period").append(`<option value="${p.id}">${p.name}</option>`));
+  }
+
+  if ($("#att-stats-classroom option").length <= 1) {
+    ALL_CLASSROOMS.forEach(c => $("#att-stats-classroom").append(`<option value="${c.id}">${c.name}</option>`));
+  }
+
+  $("#att-stats-run").off("click").on("click", runAttendanceStats);
+}
+
+async function runAttendanceStats() {
+  const startDate = $("#att-stats-start").val();
+  const endDate = $("#att-stats-end").val();
+  const period = $("#att-stats-period").val();
+  const classroom = $("#att-stats-classroom").val();
+
+  if (!startDate || !endDate) return Swal.fire('แจ้งเตือน', 'กรุณาเลือกช่วงวันที่', 'warning');
+  if (startDate > endDate) return Swal.fire('แจ้งเตือน', 'วันที่ไม่ถูกต้อง', 'warning');
+
+  $.LoadingOverlay("show", { text: "กำลังประมวลผล..." });
+  try {
+    const res = await runGoogleScript('getAttendanceSummaryV2', startDate, endDate, period, classroom);
+    if (res.status !== 'success') throw new Error(res.message);
+    renderAttendanceStats(res.data, startDate, endDate, period, classroom);
+    $("#att-stats-empty").addClass("hidden");
+    $("#att-stats-content").removeClass("hidden");
+  } catch (error) {
+    Swal.fire('ผิดพลาด', error.message, 'error');
+  } finally {
+    $.LoadingOverlay("hide");
+  }
+}
+
+function renderAttendanceStats(data, startDate, endDate, period, classroom) {
+  const totals = data.totals || { present: 0, absent: 0, late: 0, leave: 0, sick: 0, total: 0 };
+  const total = totals.total || 1;
+  const pct = (n) => ((n / total) * 100).toFixed(1) + '%';
+
+  $("#att-card-present").text(totals.present);
+  $("#att-card-present-pct").text(pct(totals.present));
+  $("#att-card-absent").text(totals.absent);
+  $("#att-card-absent-pct").text(pct(totals.absent));
+  $("#att-card-late").text(totals.late);
+  $("#att-card-late-pct").text(pct(totals.late));
+  $("#att-card-leave").text(totals.leave);
+  $("#att-card-leave-pct").text(pct(totals.leave));
+  $("#att-card-sick").text(totals.sick);
+  $("#att-card-sick-pct").text(pct(totals.sick));
+
+  renderAttendanceCharts(totals, data.dailyTrend || {});
+
+  $("#att-stats-title").text(`📋 สรุปรายบุคคล — ${data.students.length} คน (รวม ${totals.total} ครั้ง)`);
+
+  const tbody = $("#att-stats-tbody").empty();
+  if (data.students.length === 0) {
+    tbody.append('<tr><td colspan="11" class="text-center p-6 text-gray-400">ไม่พบข้อมูล</td></tr>');
+  } else {
+    data.students.forEach(s => {
+      const percent = s.total > 0 ? ((s.present / s.total) * 100).toFixed(0) : 0;
+      const roomName = (ALL_CLASSROOMS.find(c => c.id === s.classroom_id) || {}).name || s.classroom_id;
+      const percentColor = percent >= 80 ? 'text-emerald-600' : percent >= 50 ? 'text-amber-600' : 'text-rose-600';
+      const safeName = (s.name || '').replace(/'/g, "\\'");
+
+      tbody.append(`
+        <tr class="border-b border-gray-100 hover:bg-blue-50">
+          <td class="p-3 text-center text-gray-600 text-sm">${escapeHtml(roomName)}</td>
+          <td class="p-3 text-center text-gray-600 text-sm">${s.id}</td>
+          <td class="p-3 text-gray-800 text-sm font-medium">${escapeHtml(s.name)}</td>
+          <td class="p-3 text-center font-bold text-emerald-600">${s.present}</td>
+          <td class="p-3 text-center font-bold text-rose-600">${s.absent}</td>
+          <td class="p-3 text-center font-bold text-amber-600">${s.late}</td>
+          <td class="p-3 text-center font-bold text-blue-600">${s.leave}</td>
+          <td class="p-3 text-center font-bold text-purple-600">${s.sick}</td>
+          <td class="p-3 text-center font-bold bg-gray-100">${s.total}</td>
+          <td class="p-3 text-center font-bold ${percentColor}">${percent}%</td>
+          <td class="p-3 text-center">
+            <button onclick="viewAttendanceStudentDetail('${s.id}', '${safeName}')"
+                    class="px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-bold hover:bg-blue-200">
+              👁️
+            </button>
+          </td>
+        </tr>
+      `);
+    });
+
+    tbody.append(`
+      <tr class="font-bold bg-blue-100">
+        <td colspan="3" class="p-3 text-center">รวมทั้งสิ้น</td>
+        <td class="p-3 text-center text-emerald-700">${totals.present}</td>
+        <td class="p-3 text-center text-rose-700">${totals.absent}</td>
+        <td class="p-3 text-center text-amber-700">${totals.late}</td>
+        <td class="p-3 text-center text-blue-700">${totals.leave}</td>
+        <td class="p-3 text-center text-purple-700">${totals.sick}</td>
+        <td class="p-3 text-center">${totals.total}</td>
+        <td class="p-3 text-center">100%</td>
+        <td></td>
+      </tr>
+    `);
+  }
+}
+
+function renderAttendanceCharts(totals, dailyTrend) {
+  const pieCanvas = document.getElementById('att-pie-chart');
+  if (pieCanvas) {
+    if (window.attPieChart) window.attPieChart.destroy();
+    window.attPieChart = new Chart(pieCanvas.getContext('2d'), {
+      type: 'pie',
+      data: {
+        labels: ['มา', 'ขาด', 'สาย', 'ลา', 'ป่วย'],
+        datasets: [{
+          data: [totals.present, totals.absent, totals.late, totals.leave, totals.sick],
+          backgroundColor: ['#10b981', '#ef4444', '#eab308', '#3b82f6', '#a855f7']
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'right' }, title: { display: true, text: 'สัดส่วนการเข้าแถว' } }
+      }
+    });
+  }
+
+  const dates = Object.keys(dailyTrend).sort();
+  const present = dates.map(d => dailyTrend[d].present);
+  const others = dates.map(d => dailyTrend[d].absent + dailyTrend[d].late + dailyTrend[d].leave + dailyTrend[d].sick);
+
+  const barCanvas = document.getElementById('att-bar-chart');
+  if (barCanvas) {
+    if (window.attBarChart) window.attBarChart.destroy();
+    window.attBarChart = new Chart(barCanvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: dates.map(d => { const p = d.split('-'); return `${parseInt(p[2])}/${parseInt(p[1])}`; }),
+        datasets: [
+          { label: 'มา', data: present, backgroundColor: '#10b981', stack: 'total' },
+          { label: 'ขาด/ลา/สาย/ป่วย', data: others, backgroundColor: '#ef4444', stack: 'total' }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'top' }, title: { display: true, text: 'แนวโน้มรายวัน' } },
+        scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } }
+      }
+    });
+  }
+}
+
+async function viewAttendanceStudentDetail(studentId, studentName) {
+  const startDate = $("#att-stats-start").val();
+  const endDate = $("#att-stats-end").val();
+  const period = $("#att-stats-period").val();
+
+  $("#student-detail-title").text(`👁️ ${studentName}`);
+  $("#student-detail-sub").text(`รหัส: ${studentId} | เข้าแถว`);
+  $("#student-detail-modal").css('display', 'flex');
+
+  const tbody = $("#student-detail-tbody");
+  tbody.html('<tr><td colspan="3" class="text-center p-6 text-gray-400">กำลังโหลด...</td></tr>');
+
+  try {
+    const res = await runGoogleScript('getAttendanceStudentDetail', studentId, startDate, endDate, period);
+    tbody.empty();
+    if (res.status === 'success' && res.data.length > 0) {
+      const colorMap = {
+        'มา': 'bg-emerald-100 text-emerald-800',
+        'ขาด': 'bg-rose-100 text-rose-800',
+        'สาย': 'bg-amber-100 text-amber-800',
+        'ลา': 'bg-blue-100 text-blue-800',
+        'ป่วย': 'bg-purple-100 text-purple-800'
+      };
+      const periodMap = { morning: 'เช้า', noon: 'เที่ยง', evening: 'เย็น' };
+      res.data.forEach(r => {
+        const cls = colorMap[r.status] || 'bg-gray-100';
+        tbody.append(`
+          <tr class="border-b border-gray-100 hover:bg-blue-50">
+            <td class="p-3 text-gray-700">${r.date} <span class="text-xs text-gray-400">(${periodMap[r.period] || r.period})</span></td>
+            <td class="p-3 text-center"><span class="px-3 py-1 rounded-full text-xs font-bold ${cls}">${r.status}</span></td>
+            <td class="p-3 text-gray-600 text-sm">${r.reason || '—'}</td>
+          </tr>
+        `);
+      });
+    } else {
+      tbody.html('<tr><td colspan="3" class="text-center p-6 text-gray-400">ไม่พบข้อมูล</td></tr>');
+    }
+  } catch (err) {
+    tbody.html(`<tr><td colspan="3" class="text-center p-6 text-rose-500">${err.message}</td></tr>`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 5. RISK VIEW (Weekly + Monthly)
+// ═══════════════════════════════════════════════════════════════
+
+const riskViewState = {};
+
+function initRiskView(tabId) {
+  const $tab = $('#' + tabId);
+  const mode = $tab.data('risk-mode') || 'week';
+  const prefix = $tab.data('risk-prefix') || 'r';
+
+  if (!$tab.data('initialized')) {
+    $tab.data('initialized', true);
+    $tab.html(buildRiskViewHtml(prefix));
+
+    const $roomSel = $tab.find('.' + prefix + '-classroom');
+    ALL_CLASSROOMS.forEach(c => $roomSel.append(`<option value="${c.id}">${c.name}</option>`));
+
+    riskViewState[tabId] = {
+      mode, prefix,
+      startDate: null, endDate: null,
+      classroomFilter: '',
+      weights: { attendance: 40, cleaning: 30, subject: 30 },
+      lastData: null,
+      loaded: false
+    };
+
+    $tab.find('.' + prefix + '-prev').on('click', () => shiftRiskView(tabId, -1));
+    $tab.find('.' + prefix + '-next').on('click', () => shiftRiskView(tabId, 1));
+    $tab.find('.' + prefix + '-run').on('click', () => loadRiskView(tabId));
+    $tab.find('.' + prefix + '-print').on('click', () => printRiskSummaryFor(tabId));
+    $tab.find('.' + prefix + '-settings').on('click', () => openRiskSettings(tabId));
+    $tab.find('.' + prefix + '-classroom').on('change', function() {
+      riskViewState[tabId].classroomFilter = $(this).val();
+    });
+    $tab.find('.' + prefix + '-settings-save').on('click', () => saveRiskSettings(tabId));
+
+    setRiskPeriodFor(tabId, TODAY);
+  }
+// ✅ เพิ่ม: ให้คลิกช่องวันที่เปิด date picker
+setTimeout(() => {
+  const $dateInput = $('#' + tabId).find('#' + prefix + '-date-display');
+  if ($dateInput.length && !$dateInput[0]._flatpickr) {
+    flatpickr($dateInput[0], {
+      mode: 'range',
+      dateFormat: 'Y-m-d',
+      locale: 'th',
+      onChange: function(selectedDates) {
+        if (selectedDates.length === 2) {
+          const fmt = (dt) => [
+            dt.getFullYear(),
+            String(dt.getMonth() + 1).padStart(2, '0'),
+            String(dt.getDate()).padStart(2, '0')
+          ].join('-');
+          riskViewState[tabId].startDate = fmt(selectedDates[0]);
+          riskViewState[tabId].endDate = fmt(selectedDates[1]);
+          // อัปเดตข้อความให้อ่านง่าย
+          const fmtThai = (ds) => {
+            const p = ds.split('-');
+            return `${parseInt(p[2])}/${parseInt(p[1])}/${parseInt(p[0]) + 543}`;
+          };
+          $dateInput.val(`${fmtThai(riskViewState[tabId].startDate)} - ${fmtThai(riskViewState[tabId].endDate)}`);
+          loadRiskView(tabId);
+        }
+      }
+    });
+  }
+}, 100);
+  // ✅ ดึง weights ใหม่ทุกครั้ง (shared)
+  google.script.run.withSuccessHandler(function(res) {
+    if (res.status === 'success' && riskViewState[tabId]) {
+      riskViewState[tabId].weights = res.data;
+      $tab.find('.' + prefix + '-weights').text(riskWeightsText(res.data));
+
+      Object.keys(riskViewState).forEach(otherId => {
+        if (otherId !== tabId && riskViewState[otherId]) {
+          riskViewState[otherId].weights = res.data;
+          $('#' + otherId).find('.' + riskViewState[otherId].prefix + '-weights').text(riskWeightsText(res.data));
+        }
+      });
+    }
+  }).getRiskWeights();
+
+  if (riskViewState[tabId] && riskViewState[tabId].lastData) {
+    renderRiskView(tabId, riskViewState[tabId].lastData);
+    $tab.find('.' + prefix + '-empty').addClass('hidden');
+    $tab.find('.' + prefix + '-content').removeClass('hidden');
+  } else {
+    loadRiskView(tabId);
+  }
+}
+
+function riskWeightsText(w) {
+  return `เข้าแถว ${w.attendance}% | เขตพื้นที่ ${w.cleaning}% | เข้าเรียน ${w.subject}%`;
+}
+
+function buildRiskViewHtml(p) {
+  return `
+    <div class="app-card p-5 mb-5">
+      <div class="flex flex-col md:flex-row gap-3 items-end flex-wrap">
+        <div>
+          <label class="block text-gray-500 text-sm font-bold mb-1">📅 ช่วงวันที่</label>
+          <input type="text" id="${p}-date-display" class="w-full cursor-pointer" readonly style="min-width:240px;" placeholder="คลิกเพื่อเลือกช่วง">
+        </div>
+        <div>
+          <label class="block text-gray-500 text-sm font-bold mb-1">🏫 ห้อง</label>
+          <select class="${p}-classroom" class="w-full"><option value="">ทุกห้อง</option></select>
+        </div>
+        <div class="flex gap-2 ml-auto flex-wrap">
+          <button class="${p}-settings px-4 py-2 bg-gray-100 text-gray-700 rounded-xl font-bold active:scale-95">⚙️ ตั้งค่า</button>
+          <button class="${p}-prev px-3 py-2 bg-gray-100 rounded-xl font-bold active:scale-95">◀</button>
+          <button class="${p}-next px-3 py-2 bg-gray-100 rounded-xl font-bold active:scale-95">▶</button>
+          <button class="${p}-run px-6 py-2 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-xl font-bold shadow-lg active:scale-95">🔍 ประเมิน</button>
+          <button class="${p}-print px-4 py-2 bg-slate-700 text-white rounded-xl font-bold active:scale-95">🖨️ พิมพ์รายงาน</button>
+        </div>
+      </div>
+      <div class="mt-2 text-xs text-gray-400">น้ำหนัก: <span class="${p}-weights">เข้าแถว 40% | เขตพื้นที่ 30% | เข้าเรียน 30%</span></div>
+    </div>
+
+    <div class="${p}-empty app-card p-5 text-center py-12 text-gray-400">กำลังโหลด...</div>
+
+    <div class="${p}-content hidden">
+      <div class="app-card p-5 mb-5">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div class="p-4 rounded-2xl" style="background:#fef2f2;">
+            <div class="text-xs font-bold text-rose-800">🔴 กลุ่มใกล้ชิด</div>
+            <div class="${p}-card-red text-3xl font-extrabold text-rose-700 mt-1">0</div>
+            <div class="text-xs text-rose-500">ต้องติดตามทันที</div>
+          </div>
+          <div class="p-4 rounded-2xl" style="background:#fefce8;">
+            <div class="text-xs font-bold text-amber-800">🟡 กลุ่มห่วงใย</div>
+            <div class="${p}-card-yellow text-3xl font-extrabold text-amber-700 mt-1">0</div>
+            <div class="text-xs text-amber-500">ต้องเฝ้าระวัง</div>
+          </div>
+          <div class="p-4 rounded-2xl" style="background:#f0fdf4;">
+            <div class="text-xs font-bold text-emerald-800">🟢 กลุ่มไว้ใจ</div>
+            <div class="${p}-card-green text-3xl font-extrabold text-emerald-700 mt-1">0</div>
+            <div class="text-xs text-emerald-500">ทำได้ดี</div>
+          </div>
+          <div class="p-4 rounded-2xl" style="background:#eff6ff;">
+            <div class="text-xs font-bold text-blue-800">⭐ คะแนนเฉลี่ย</div>
+            <div class="${p}-card-avg text-3xl font-extrabold text-blue-700 mt-1">0%</div>
+            <div class="${p}-card-total text-xs text-blue-500">จาก 0 คน</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="app-card p-5 mb-5">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div class="bg-gray-50 p-4 rounded-2xl h-80"><canvas id="${p}-pie-chart"></canvas></div>
+          <div class="bg-gray-50 p-4 rounded-2xl h-80"><canvas id="${p}-bar-chart"></canvas></div>
+        </div>
+      </div>
+
+      <div class="app-card p-5 mb-5">
+        <div class="flex justify-between items-center mb-3 flex-wrap gap-2">
+          <h3 class="text-lg font-bold text-gray-800">📊 ตารางรายวัน</h3>
+          <div class="flex gap-2 text-xs">
+            <span class="px-2 py-1 bg-rose-100 text-rose-700 rounded">🔴 &lt; 60%</span>
+            <span class="px-2 py-1 bg-amber-100 text-amber-700 rounded">🟡 60-84%</span>
+            <span class="px-2 py-1 bg-emerald-100 text-emerald-700 rounded">🟢 ≥ 85%</span>
+            <span class="px-2 py-1 bg-gray-100 text-gray-500 rounded">⚪ ไม่มีข้อมูล</span>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="min-w-full">
+            <thead class="${p}-grid-thead"></thead>
+            <tbody class="${p}-grid-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="app-card p-5 mb-5 ${p}-list-red-wrap">
+        <h3 class="text-lg font-bold text-rose-700 mb-3">🔴 กลุ่มใกล้ชิด (ต้องติดตามทันที)</h3>
+        <div class="table-responsive">
+          <table class="min-w-full">
+            <thead>
+              <tr class="bg-rose-700 text-white">
+                <th class="p-3 text-center">ห้อง</th><th class="p-3 text-left">ชื่อ-สกุล</th>
+                <th class="p-3 text-center">เข้าแถว</th><th class="p-3 text-center">เขตพื้นที่</th>
+                <th class="p-3 text-center">เข้าเรียน</th><th class="p-3 text-center">รวม</th>
+                <th class="p-3 text-center">Streak</th><th class="p-3 text-center">ดำเนินการ</th>
+              </tr>
+            </thead>
+            <tbody class="${p}-list-red"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="app-card p-5 mb-5 ${p}-list-yellow-wrap">
+        <h3 class="text-lg font-bold text-amber-700 mb-3">🟡 กลุ่มห่วงใย (เฝ้าระวัง)</h3>
+        <div class="table-responsive">
+          <table class="min-w-full">
+            <thead>
+              <tr class="bg-amber-700 text-white">
+                <th class="p-3 text-center">ห้อง</th><th class="p-3 text-left">ชื่อ-สกุล</th>
+                <th class="p-3 text-center">เข้าแถว</th><th class="p-3 text-center">เขตพื้นที่</th>
+                <th class="p-3 text-center">เข้าเรียน</th><th class="p-3 text-center">รวม</th>
+                <th class="p-3 text-center">Streak</th><th class="p-3 text-center">ดู</th>
+              </tr>
+            </thead>
+            <tbody class="${p}-list-yellow"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="app-card p-5 ${p}-list-green-wrap">
+        <h3 class="text-lg font-bold text-emerald-700 mb-3">🟢 กลุ่มไว้ใจ (ทำได้ดี)</h3>
+        <div class="table-responsive">
+          <table class="min-w-full">
+            <thead>
+              <tr class="bg-emerald-700 text-white">
+                <th class="p-3 text-center">ห้อง</th><th class="p-3 text-left">ชื่อ-สกุล</th>
+                <th class="p-3 text-center">เข้าแถว</th><th class="p-3 text-center">เขตพื้นที่</th>
+                <th class="p-3 text-center">เข้าเรียน</th><th class="p-3 text-center">รวม</th>
+                <th class="p-3 text-center">Streak</th><th class="p-3 text-center">ดู</th>
+              </tr>
+            </thead>
+            <tbody class="${p}-list-green"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div id="${p}-settings-modal" class="fixed inset-0 z-[55] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" style="display:none;">
+      <div class="app-card w-full max-w-md bg-white rounded-3xl overflow-hidden">
+        <div class="flex justify-between items-center p-5 bg-gradient-to-r from-slate-800 to-slate-900 text-white">
+          <h2 class="text-lg font-bold">⚙️ ตั้งค่าน้ำหนัก</h2>
+          <button onclick="$('#${p}-settings-modal').hide()" class="text-white text-2xl hover:opacity-75">×</button>
+        </div>
+        <div class="p-5 space-y-4">
+          <div><label class="block text-sm font-bold mb-1">📝 เข้าแถว</label><input type="number" id="${p}-w-att" class="w-full" min="0" max="100"></div>
+          <div><label class="block text-sm font-bold mb-1">🧹 เขตพื้นที่</label><input type="number" id="${p}-w-cln" class="w-full" min="0" max="100"></div>
+          <div><label class="block text-sm font-bold mb-1">📚 เข้าเรียน</label><input type="number" id="${p}-w-subj" class="w-full" min="0" max="100"></div>
+        </div>
+        <div class="p-5 flex gap-3">
+          <button onclick="$('#${p}-settings-modal').hide()" class="flex-1 py-3 bg-gray-100 rounded-2xl font-bold">ยกเลิก</button>
+          <button class="${p}-settings-save flex-1 py-3 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-2xl font-bold">บันทึก</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function setRiskPeriodFor(tabId, baseDateStr) {
+  const st = riskViewState[tabId];
+  if (!st) return;
+
+  const d = new Date(baseDateStr);
+  let start, end;
+
+  if (st.mode === 'week') {
+    const dow = d.getDay();
+    start = new Date(d); start.setDate(d.getDate() - dow + (dow === 0 ? -6 : 1));
+    end = new Date(start); end.setDate(start.getDate() + 4);
+  } else {
+    start = new Date(d.getFullYear(), d.getMonth(), 1);
+    end = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+  }
+
+  const fmt = (dt) => [
+    dt.getFullYear(),
+    String(dt.getMonth() + 1).padStart(2, '0'),
+    String(dt.getDate()).padStart(2, '0')
+  ].join('-');
+
+  st.startDate = fmt(start);
+  st.endDate = fmt(end);
+
+  const fmtThai = (ds) => {
+    const p = ds.split('-');
+    return `${parseInt(p[2])}/${parseInt(p[1])}/${parseInt(p[0]) + 543}`;
+  };
+
+  const label = (st.mode === 'week' ? 'สัปดาห์: ' : 'เดือน: ')
+              + `${fmtThai(st.startDate)} - ${fmtThai(st.endDate)}`;
+
+  // ✅ FIX: ใช้ # (id selector) แทน . (class selector)
+  const $display = $('#' + tabId).find('#' + st.prefix + '-date-display');
+  if ($display.length) {
+    $display.val(label);
+  } else {
+    console.warn('[Risk] Date display not found:', '#' + st.prefix + '-date-display');
+  }
+}
+
+function shiftRiskView(tabId, dir) {
+  const st = riskViewState[tabId];
+  if (!st) return;
+  const days = st.mode === 'week' ? 7 : 30;
+  const d = new Date(st.startDate);
+  d.setDate(d.getDate() + dir * days);
+  setRiskPeriodFor(tabId, d.toISOString().split('T')[0]);
+  loadRiskView(tabId);
+}
+
+async function loadRiskView(tabId) {
+  const st = riskViewState[tabId];
+  if (!st || !st.startDate) return;
+  const $tab = $('#' + tabId);
+
+  $.LoadingOverlay("show", { text: "กำลังประเมิน..." });
+  try {
+    const res = await runGoogleScript('getStudentRiskAssessment', st.startDate, st.endDate,
+                                      st.classroomFilter || '', JSON.stringify(st.weights));
+    if (res.status !== 'success') throw new Error(res.message);
+    st.lastData = res.data;
+    renderRiskView(tabId, res.data);
+    $tab.find('.' + st.prefix + '-empty').addClass('hidden');
+    $tab.find('.' + st.prefix + '-content').removeClass('hidden');
+  } catch (err) {
+    console.error('Error:', err);
+    Swal.fire('ผิดพลาด', err.message, 'error');
+  } finally {
+    $.LoadingOverlay("hide");
+  }
+}
+
+function renderRiskView(tabId, data) {
+  const st = riskViewState[tabId];
+  const $tab = $('#' + tabId);
+  const p = st.prefix;
+  const { summary, students, period } = data;
+
+  $tab.find('.' + p + '-card-red').text(summary.red);
+  $tab.find('.' + p + '-card-yellow').text(summary.yellow);
+  $tab.find('.' + p + '-card-green').text(summary.green);
+  $tab.find('.' + p + '-card-avg').text(summary.avgScore + '%');
+  $tab.find('.' + p + '-card-total').text(`จาก ${summary.totalStudents} คน`);
+
+  renderRiskViewCharts(tabId, summary, students);
+  renderRiskViewGrid(tabId, students, period.dates);
+  renderRiskViewList(tabId, 'red', students.filter(s => s.category === 'red'));
+  renderRiskViewList(tabId, 'yellow', students.filter(s => s.category === 'yellow'));
+  renderRiskViewList(tabId, 'green', students.filter(s => s.category === 'green'));
+}
+
+function renderRiskViewCharts(tabId, summary, students) {
+  const st = riskViewState[tabId];
+  const p = st.prefix;
+
+  const pieCanvas = document.getElementById(p + '-pie-chart');
+  if (pieCanvas) {
+    if (window[p + 'PieChart']) window[p + 'PieChart'].destroy();
+    window[p + 'PieChart'] = new Chart(pieCanvas.getContext('2d'), {
+      type: 'pie',
+      data: {
+        labels: ['🔴 ใกล้ชิด', '🟡 ห่วงใย', '🟢 ไว้ใจ'],
+        datasets: [{ data: [summary.red, summary.yellow, summary.green], backgroundColor: ['#ef4444', '#eab308', '#10b981'] }]
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' }, title: { display: true, text: 'สัดส่วนกลุ่ม' } } }
+    });
+  }
+
+  const top15 = students.slice(0, 15);
+  const barCanvas = document.getElementById(p + '-bar-chart');
+  if (barCanvas) {
+    if (window[p + 'BarChart']) window[p + 'BarChart'].destroy();
+    window[p + 'BarChart'] = new Chart(barCanvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: top15.map(s => s.name.length > 15 ? s.name.substring(0, 15) + '…' : s.name),
+        datasets: [{
+          label: 'Composite', data: top15.map(s => s.composite),
+          backgroundColor: top15.map(s => s.category === 'red' ? '#ef4444' : s.category === 'yellow' ? '#eab308' : '#10b981')
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+        plugins: { legend: { display: false }, title: { display: true, text: '15 อันดับแรก' } },
+        scales: { x: { beginAtZero: true, max: 100 } }
+      }
+    });
+  }
+}
+
+function renderRiskViewGrid(tabId, students, dates) {
+  const st = riskViewState[tabId];
+  const $tab = $('#' + tabId);
+  const p = st.prefix;
+  const dayNames = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
+
+  let thead = '<tr class="bg-slate-800 text-white"><th class="p-2 text-left">ชื่อ-สกุล</th><th class="p-2 text-center">ห้อง</th>';
+  dates.forEach(d => {
+    const dt = new Date(d);
+    const parts = d.split('-');
+    thead += `<th class="p-2 text-center text-xs">${dayNames[dt.getDay()]}<br><span class="opacity-75">${parseInt(parts[2])}/${parseInt(parts[1])}</span></th>`;
+  });
+  thead += '<th class="p-2 text-center">รวม</th><th class="p-2 text-center">กลุ่ม</th></tr>';
+  $tab.find('.' + p + '-grid-thead').html(thead);
+
+  const tbody = $tab.find('.' + p + '-grid-tbody').empty();
+  const cellColors = {
+    green: 'background:#dcfce7;color:#166534;font-weight:bold;',
+    yellow: 'background:#fef3c7;color:#92400e;font-weight:bold;',
+    red: 'background:#fee2e2;color:#991b1b;font-weight:bold;'
+  };
+  const catBadge = { green: 'bg-emerald-100 text-emerald-700', yellow: 'bg-amber-100 text-amber-700', red: 'bg-rose-100 text-rose-700' };
+  const catLabel = { green: '🟢', yellow: '🟡', red: '🔴' };
+
+  students.forEach(s => {
+    let html = `<tr class="border-b border-gray-100 hover:bg-blue-50">`;
+    html += `<td class="p-2 text-gray-800 text-sm font-medium">${escapeHtml(s.name)}</td>`;
+    html += `<td class="p-2 text-center text-gray-600 text-xs">${escapeHtml(s.classroom_name)}</td>`;
+    dates.forEach(d => {
+      const day = s.dailyScores[d];
+      if (!day) html += '<td class="p-2 text-center text-gray-300 text-xs">⚪</td>';
+      else {
+        const clickFn = `onclick="showRiskDailyFor('${tabId}','${s.id}','${(s.name||'').replace(/'/g,'\\\'')}','${d}')"`;
+        html += `<td class="p-2 text-center text-xs cursor-pointer hover:opacity-80" style="${cellColors[day.category]}" ${clickFn}>${day.score}%</td>`;
+      }
+    });
+    html += `<td class="p-2 text-center font-bold text-gray-800">${s.composite}%</td>`;
+    html += `<td class="p-2 text-center"><span class="px-2 py-1 rounded-lg text-xs font-bold ${catBadge[s.category]}">${catLabel[s.category]} ${s.composite}%</span></td></tr>`;
+    tbody.append(html);
+  });
+}
+
+function renderRiskViewList(tabId, category, students) {
+  const st = riskViewState[tabId];
+  const $tab = $('#' + tabId);
+  const p = st.prefix;
+  const tbody = $tab.find('.' + p + '-list-' + category).empty();
+  const wrap = $tab.find('.' + p + '-list-' + category + '-wrap');
+
+  if (students.length === 0) { wrap.hide(); return; }
+  wrap.show();
+
+  students.forEach(s => {
+    const fmtPct = (b) => b ? `<span class="font-bold ${b.score >= 85 ? 'text-emerald-600' : b.score >= 60 ? 'text-amber-600' : 'text-rose-600'}">${b.score}%</span>` : '<span class="text-gray-300">—</span>';
+
+    let actionCol = '';
+    if (category === 'red') {
+      actionCol = `
+        <button onclick="openDisciplineForStudent('${s.id}', '${(s.name||'').replace(/'/g,'\\\'')}')"
+                class="px-2 py-1 bg-rose-100 text-rose-700 rounded-lg text-xs font-bold hover:bg-rose-200 mr-1" title="จัดการเคสวินัย">⚖️</button>
+        <button onclick="showRiskDetailFor('${tabId}','${s.id}')"
+                class="px-2 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-bold hover:bg-blue-200">👁️</button>`;
+    } else {
+      actionCol = `<button onclick="showRiskDetailFor('${tabId}','${s.id}')" class="px-2 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-bold hover:bg-blue-200">👁️</button>`;
+    }
+
+    tbody.append(`
+      <tr class="border-b border-gray-100 hover:bg-blue-50">
+        <td class="p-3 text-center text-gray-600 text-sm">${escapeHtml(s.classroom_name)}</td>
+        <td class="p-3 text-gray-800 font-medium">${escapeHtml(s.name)}</td>
+        <td class="p-3 text-center">${fmtPct(s.breakdown.attendance)}</td>
+        <td class="p-3 text-center">${fmtPct(s.breakdown.cleaning)}</td>
+        <td class="p-3 text-center">${fmtPct(s.breakdown.subject)}</td>
+        <td class="p-3 text-center font-bold text-lg">${s.composite}%</td>
+        <td class="p-3 text-center">${s.streak > 0 ? `<span class="px-2 py-1 rounded-lg text-xs font-bold bg-rose-100 text-rose-700">${s.streak} วัน</span>` : '—'}</td>
+        <td class="p-3 text-center whitespace-nowrap">${actionCol}</td>
+      </tr>
+    `);
+  });
+}
+
+function openRiskSettings(tabId) {
+  const st = riskViewState[tabId];
+  if (!st) return;
+  const p = st.prefix;
+  $('#' + p + '-w-att').val(st.weights.attendance);
+  $('#' + p + '-w-cln').val(st.weights.cleaning);
+  $('#' + p + '-w-subj').val(st.weights.subject);
+  $('#' + p + '-settings-modal').css('display', 'flex');
+}
+
+function saveRiskSettings(tabId) {
+  const st = riskViewState[tabId];
+  if (!st) return;
+  const p = st.prefix;
+  const w = {
+    attendance: Number($('#' + p + '-w-att').val()) || 0,
+    cleaning: Number($('#' + p + '-w-cln').val()) || 0,
+    subject: Number($('#' + p + '-w-subj').val()) || 0
+  };
+  if (w.attendance + w.cleaning + w.subject <= 0) return Swal.fire('แจ้งเตือน', 'ผลรวมต้องมากกว่า 0', 'warning');
+
+  $.LoadingOverlay("show");
+  google.script.run.withSuccessHandler(function(res) {
+    $.LoadingOverlay("hide");
+    if (res.status === 'success') {
+      Object.keys(riskViewState).forEach(otherId => {
+        if (riskViewState[otherId]) {
+          riskViewState[otherId].weights = w;
+          $('#' + otherId).find('.' + riskViewState[otherId].prefix + '-weights').text(riskWeightsText(w));
+        }
+      });
+
+      $('#' + p + '-settings-modal').hide();
+      Swal.fire({ icon: 'success', title: 'บันทึกแล้ว', timer: 1200, showConfirmButton: false });
+      if (st.lastData) loadRiskView(tabId);
+    } else {
+      Swal.fire('ผิดพลาด', res.message, 'error');
+    }
+  }).saveRiskWeights(JSON.stringify(w));
+}
+
+function showRiskDetailFor(tabId, studentId) {
+  const st = riskViewState[tabId];
+  const stu = (st.lastData.students || []).find(s => s.id === studentId);
+  if (!stu) return;
+
+  $("#risk-detail-title").text(`👁️ ${stu.name}`);
+  $("#risk-detail-sub").text(`ห้อง ${stu.classroom_name} | Composite ${stu.composite}% | ${stu.category === 'red' ? '🔴 ใกล้ชิด' : stu.category === 'yellow' ? '🟡 ห่วงใย' : '🟢 ไว้ใจ'}`);
+  $("#risk-detail-modal").css('display', 'flex');
+
+  const b = stu.breakdown;
+  const card = (icon, label, bd, color) => {
+    if (!bd) return `<div class="p-3 rounded-xl bg-gray-100"><div class="text-xs font-bold text-gray-500">${icon} ${label}</div><div class="text-lg font-extrabold text-gray-400 mt-1">ไม่มีข้อมูล</div></div>`;
+    return `<div class="p-3 rounded-xl" style="background:${color.bg};"><div class="text-xs font-bold" style="color:${color.text};">${icon} ${label}</div><div class="text-2xl font-extrabold mt-1" style="color:${color.text};">${bd.score}%</div><div class="text-xs mt-1" style="color:${color.text};">${bd.points} / ${bd.total} ครั้ง</div></div>`;
+  };
+  $("#risk-detail-breakdown").html(
+    card('📝','เข้าแถว',b.attendance,{bg:'#dcfce7',text:'#166534'}) +
+    card('🧹','เขตพื้นที่',b.cleaning,{bg:'#dbeafe',text:'#1e40af'}) +
+    card('📚','เข้าเรียน',b.subject,{bg:'#f3e8ff',text:'#6b21a8'})
+  );
+
+  const tbody = $("#risk-detail-tbody").empty();
+  const dates = Object.keys(stu.dailyScores).sort();
+  const catBadge = { green: 'bg-emerald-100 text-emerald-700', yellow: 'bg-amber-100 text-amber-700', red: 'bg-rose-100 text-rose-700' };
+  const cellStatus = (bd) => {
+    if (!bd) return '<span class="text-gray-300">—</span>';
+    const pct = (bd.points / bd.total) * 100;
+    const cls = pct >= 85 ? 'text-emerald-600' : pct >= 60 ? 'text-amber-600' : 'text-rose-600';
+    return `<span class="${cls} font-bold text-xs">${bd.points}/${bd.total}</span>`;
+  };
+  dates.forEach(d => {
+    const day = stu.dailyScores[d];
+    if (!day) { tbody.append(`<tr class="border-b border-gray-100"><td class="p-3 text-gray-500 text-sm">${d}</td><td colspan="4" class="p-3 text-center text-gray-400 text-xs">ไม่มีข้อมูล</td></tr>`); return; }
+    tbody.append(`
+      <tr class="border-b border-gray-100 hover:bg-blue-50">
+        <td class="p-3 text-gray-700 text-sm">${d}</td>
+        <td class="p-3 text-center">${cellStatus(day.breakdown.attendance)}</td>
+        <td class="p-3 text-center">${cellStatus(day.breakdown.cleaning)}</td>
+        <td class="p-3 text-center">${cellStatus(day.breakdown.subject)}</td>
+        <td class="p-3 text-center"><span class="px-2 py-1 rounded-lg text-xs font-bold ${catBadge[day.category]}">${day.score}%</span></td>
+      </tr>`);
+  });
+}
+
+function showRiskDailyFor(tabId, studentId, studentName, date) {
+  const st = riskViewState[tabId];
+  const stu = (st.lastData.students || []).find(s => s.id === studentId);
+  if (!stu) return;
+  const day = stu.dailyScores[date];
+  if (!day) return;
+
+  $("#risk-daily-title").text(`📅 ${date}`);
+  $("#risk-daily-sub").text(studentName);
+  $("#risk-daily-modal").css('display', 'flex');
+
+  const statusOf = (bd) => {
+    if (!bd) return '<span class="text-gray-400">ไม่มีข้อมูล</span>';
+    const pct = (bd.points / bd.total) * 100;
+    const cls = pct >= 85 ? 'text-emerald-700' : pct >= 60 ? 'text-amber-700' : 'text-rose-700';
+    return `<span class="font-bold ${cls}">${pct.toFixed(0)}% (${bd.points}/${bd.total})</span>`;
+  };
+  $("#risk-daily-breakdown").html(`
+    <div class="flex justify-between items-center p-3 bg-gray-50 rounded-xl"><span class="font-bold">📝 เข้าแถว</span><span>${statusOf(day.breakdown.attendance)}</span></div>
+    <div class="flex justify-between items-center p-3 bg-gray-50 rounded-xl"><span class="font-bold">🧹 เขตพื้นที่</span><span>${statusOf(day.breakdown.cleaning)}</span></div>
+    <div class="flex justify-between items-center p-3 bg-gray-50 rounded-xl"><span class="font-bold">📚 เข้าเรียน</span><span>${statusOf(day.breakdown.subject)}</span></div>
+    <div class="p-3 rounded-xl mt-2 text-center" style="background:${day.category === 'red' ? '#fee2e2' : day.category === 'yellow' ? '#fef3c7' : '#dcfce7'};">
+      <div class="text-xs font-bold">คะแนนรวมวันนี้</div>
+      <div class="text-3xl font-extrabold">${day.score}%</div>
+    </div>
+  `);
+}
+
+function printRiskSummaryFor(tabId) {
+  const st = riskViewState[tabId];
+  if (!st || !st.lastData) return Swal.fire('แจ้งเตือน', 'กรุณาประเมินก่อน', 'warning');
+
+  const data = st.lastData;
+  const schoolName = (CONFIG && CONFIG.school_config && CONFIG.school_config.schoolName) || 'โรงเรียน';
+  const rangeText = `${st.mode === 'week' ? 'สัปดาห์' : 'เดือน'} ${formatThaiDate(data.period.startDate)} - ${formatThaiDate(data.period.endDate)}`;
+
+  const win = window.open('', '_blank');
+  if (!win) return Swal.fire('แจ้งเตือน', 'กรุณาอนุญาต Pop-up', 'warning');
+  win.document.write(buildSummaryReportHtml(data, schoolName, rangeText));
+  win.document.close();
+}
+
+function buildSummaryReportHtml(data, schoolName, rangeText) {
+  const students = data.students || [];
+  const rows = students.map((s, i) => `
+    <tr>
+      <td style="text-align:center">${i + 1}</td>
+      <td>${escapeHtml(s.classroom_name)}</td>
+      <td>${s.id}</td>
+      <td>${escapeHtml(s.name)}</td>
+      <td style="text-align:center">${s.breakdown.attendance ? s.breakdown.attendance.score + '%' : '—'}</td>
+      <td style="text-align:center">${s.breakdown.cleaning ? s.breakdown.cleaning.score + '%' : '—'}</td>
+      <td style="text-align:center">${s.breakdown.subject ? s.breakdown.subject.score + '%' : '—'}</td>
+      <td style="text-align:center;font-weight:bold">${s.composite}%</td>
+      <td style="text-align:center">${s.streak > 0 ? s.streak + ' วัน' : '—'}</td>
+      <td style="text-align:center;font-weight:bold;background:${s.category === 'red' ? '#fee2e2' : s.category === 'yellow' ? '#fef3c7' : '#dcfce7'};">${s.category === 'red' ? '🔴 ใกล้ชิด' : s.category === 'yellow' ? '🟡 ห่วงใย' : '🟢 ไว้ใจ'}</td>
+    </tr>
+  `).join('');
+
+  return `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>รายงานสรุปกลุ่มความเสี่ยง</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  @page { size: A4; margin: 1.5cm; }
+  body { font-family: 'TH Sarabun New', 'Sarabun', sans-serif; font-size: 14pt; margin: 0; padding: 0; }
+  .header { text-align: center; margin-bottom: 20px; }
+  .header h1 { font-size: 18pt; margin: 0 0 5px 0; }
+  .header p { margin: 0; font-size: 13pt; }
+  table { width: 100%; border-collapse: collapse; font-size: 11pt; }
+  th, td { border: 1px solid #000; padding: 4px 6px; }
+  th { background: #1e3a8a; color: #fff; font-weight: bold; }
+  .summary { display: flex; gap: 10px; justify-content: space-around; margin: 15px 0; font-size: 12pt; }
+  .summary > div { padding: 6px 16px; border-radius: 6px; font-weight: bold; }
+  .toolbar { position: fixed; top: 10px; right: 10px; background: #fff; padding: 8px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,.15); }
+  .toolbar button { padding: 6px 14px; border: 1px solid #ccc; border-radius: 6px; cursor: pointer; font-weight: bold; }
+  @media print { .toolbar { display: none; } }
+</style></head>
+<body>
+<div class="toolbar"><button onclick="window.print()">🖨️ พิมพ์</button></div>
+<div class="header">
+  <h1>รายงานสรุปกลุ่มความเสี่ยงนักเรียน</h1>
+  <p>${schoolName}</p>
+  <p>ช่วงเวลา: ${rangeText}</p>
+</div>
+<div class="summary">
+  <div style="background:#f0fdf4;color:#166534;">🟢 ไว้ใจ: ${data.summary.green} คน</div>
+  <div style="background:#fefce8;color:#92400e;">🟡 ห่วงใย: ${data.summary.yellow} คน</div>
+  <div style="background:#fef2f2;color:#991b1b;">🔴 ใกล้ชิด: ${data.summary.red} คน</div>
+  <div style="background:#eff6ff;color:#1e40af;">⭐ เฉลี่ย: ${data.summary.avgScore}%</div>
+</div>
+<table>
+  <thead>
+    <tr>
+      <th>#</th><th>ห้อง</th><th>รหัส</th><th>ชื่อ-สกุล</th>
+      <th>เข้าแถว</th><th>เขตพื้นที่</th><th>เข้าเรียน</th>
+      <th>รวม</th><th>Streak</th><th>กลุ่ม</th>
+    </tr>
+  </thead>
+  <tbody>${rows}</tbody>
+</table>
+<div style="margin-top:30px;text-align:right;font-size:12pt;">
+  <div>ลงชื่อ ........................................................ ครูผู้รายงาน</div>
+  <div style="margin-top:6px;">( ........................................................ )</div>
+</div>
+</body></html>`;
+}
+
+// ✅ Round 1: ปุ่ม ⚖️ จาก Risk View → Discipline
+async function openDisciplineForStudent(studentId, studentName) {
+  $.LoadingOverlay("show", { text: "กำลังค้นหาเคส..." });
+  try {
+    const res = await runGoogleScript('getDisciplineCases', { search: studentId });
+    const cases = (res.status === 'success' && res.data.cases) || [];
+    const active = cases.find(c => c.stage !== 'closed');
+
+    if (active) {
+      $.LoadingOverlay("hide");
+      $(".nav-tab").removeClass("active");
+      $(".nav-tab[data-tab='discipline']").addClass("active");
+      $(".tab-content").removeClass("active").hide();
+      $("#discipline").addClass("active").show();
+      initDiscipline();
+      setTimeout(() => openDisciplineCase(active.case_id), 400);
+    } else {
+      $.LoadingOverlay("hide");
+      $(".nav-tab").removeClass("active");
+      $(".nav-tab[data-tab='discipline']").addClass("active");
+      $(".tab-content").removeClass("active").hide();
+      $("#discipline").addClass("active").show();
+      initDiscipline();
+      setTimeout(() => {
+        $("#disc-search").val(studentName || studentId);
+        $("#disc-classroom").val("");
+        $(".disc-stage-btn").removeClass("bg-blue-700 text-white").addClass("bg-gray-100 text-gray-600");
+        $(".disc-stage-btn[data-stage='all']").removeClass("bg-gray-100 text-gray-600").addClass("bg-blue-700 text-white");
+        discState.currentStage = 'all';
+        loadDisciplineCases();
+      }, 400);
+
+      Swal.fire({
+        icon: 'info',
+        title: 'ยังไม่มีเคสวินัย',
+        html: `นักเรียน <b>${escapeHtml(studentName)}</b> ยังไม่มีเคสในระบบ<br><small class="text-gray-500">กด "📥 Sync สัปดาห์นี้" เพื่อสร้างเคสอัตโนมัติ</small>`,
+        confirmButtonText: 'รับทราบ'
+      });
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } catch (err) {
+    $.LoadingOverlay("hide");
+    Swal.fire('ผิดพลาด', err.message, 'error');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 6. DISCIPLINE WORKFLOW
+// ═══════════════════════════════════════════════════════════════
+
+let discState = { currentStage: 'all', currentCaseId: null, currentDetail: null };
+
+function initDiscipline() {
+  if ($("#disc-classroom option").length <= 1) {
+    ALL_CLASSROOMS.forEach(c => $("#disc-classroom").append(`<option value="${c.id}">${c.name}</option>`));
+  }
+
+  $(".disc-stage-btn").off("click").on("click", function() {
+    $(".disc-stage-btn").removeClass("bg-blue-700 text-white").addClass("bg-gray-100 text-gray-600");
+    $(this).removeClass("bg-gray-100 text-gray-600").addClass("bg-blue-700 text-white");
+    discState.currentStage = $(this).data("stage");
+    loadDisciplineCases();
+  });
+
+  $("#disc-search").off("input").on("input", debounce(() => loadDisciplineCases(), 400));
+  $("#disc-classroom").off("change").on("change", loadDisciplineCases);
+  $("#disc-refresh").off("click").on("click", loadDisciplineCases);
+  $("#disc-sync").off("click").on("click", syncDisciplineNow);
+  $("#disc-export").off("click").on("click", exportDisciplineCsv);
+
+  $("#disc-btn-close").off("click").on("click", () => closeDisciplineCase(discState.currentCaseId));
+  $("#disc-btn-advance").off("click").on("click", advanceStageClick);
+  $("#disc-meeting-save").off("click").on("click", saveMeetingInfo);
+  $("#disc-sig-save").off("click").on("click", saveSignature);
+  $("#disc-sig-party").off("change").on("change", function() {
+    $("#disc-sig-parent-fields").toggle($(this).val() === "parent");
+  });
+  $("#disc-activity-pass").off("click").on("click", () => markActivityResult('pass'));
+  $("#disc-activity-fail").off("click").on("click", () => markActivityResult('fail'));
+
+  loadDisciplineCases();
+}
+
+async function loadDisciplineCases() {
+  $.LoadingOverlay("show", { text: "กำลังโหลดเคส..." });
+  try {
+    const filter = {
+      stage: discState.currentStage,
+      classroom: $("#disc-classroom").val() || "",
+      search: $("#disc-search").val() || ""
+    };
+    const res = await runGoogleScript('getDisciplineCases', filter);
+    if (res.status !== 'success') throw new Error(res.message);
+    renderDisciplineCases(res.data);
+  } catch (err) {
+    console.error('loadDisciplineCases:', err);
+    Swal.fire('ผิดพลาด', err.message, 'error');
+  } finally {
+    $.LoadingOverlay("hide");
+  }
+}
+
+function renderDisciplineCases(data) {
+  const { cases, stats } = data;
+
+  $(".disc-stage-count").each(function() {
+    const st = $(this).data("stage");
+    let n = 0;
+    if (st === 'all') n = (stats.stage1 || 0) + (stats.stage2 || 0) + (stats.stage3 || 0) + (stats.stage4 || 0) + (stats.closed || 0);
+    else if (st === '1') n = stats.stage1 || 0;
+    else if (st === '2') n = stats.stage2 || 0;
+    else if (st === '3') n = stats.stage3 || 0;
+    else if (st === '4') n = stats.stage4 || 0;
+    else if (st === 'closed') n = stats.closed || 0;
+    $(this).text(`(${n})`);
+  });
+
+  const tbody = $("#disc-list").empty();
+  $("#disc-empty").addClass("hidden");
+  $("#disc-list-container").removeClass("hidden");
+
+  if (cases.length === 0) {
+    tbody.append('<tr><td colspan="7" class="text-center p-6 text-gray-400">ไม่พบเคส</td></tr>');
+  } else {
+    const stageBadge = {
+      '1': 'bg-amber-100 text-amber-800',
+      '2': 'bg-orange-100 text-orange-800',
+      '3': 'bg-blue-100 text-blue-800',
+      '4': 'bg-rose-100 text-rose-800',
+      'closed': 'bg-gray-100 text-gray-600'
+    };
+    const stageLabel = { '1': '📄 ตักเตือน', '2': '📋 ทัณฑ์บน', '3': '🎯 กิจกรรม', '4': '📨 แจ้ง ผปค.', 'closed': '✅ ปิด' };
+
+    cases.forEach(c => {
+      const badge = stageBadge[c.stage] || stageBadge['1'];
+      const label = stageLabel[c.stage] || c.stage;
+      const created = c.created_at ? c.created_at.split('T')[0] : '';
+      tbody.append(`
+        <tr class="border-b border-gray-100 hover:bg-blue-50">
+          <td class="p-3 text-center text-sm font-bold text-gray-700">${c.case_id}</td>
+          <td class="p-3 text-gray-800 font-medium">${escapeHtml(c.student_name)}</td>
+          <td class="p-3 text-center text-gray-600 text-sm">${escapeHtml(c.classroom_name)}</td>
+          <td class="p-3 text-center"><span class="px-2 py-1 rounded-lg text-xs font-bold ${badge}">${label}</span></td>
+          <td class="p-3 text-center text-xs text-gray-600">${c.status}</td>
+          <td class="p-3 text-center text-xs text-gray-500">${created}</td>
+          <td class="p-3 text-center">
+            <button onclick="openDisciplineCase('${c.case_id}')" class="px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-bold hover:bg-blue-200">👁️</button>
+          </td>
+        </tr>
+      `);
+    });
+  }
+
+  // Round 3: Charts
+  renderDisciplineCharts(cases, stats);
+}
+
+function renderDisciplineCharts(cases, stats) {
+  const pieCanvas = document.getElementById('disc-pie-chart');
+  if (pieCanvas) {
+    if (window.discPieChart) window.discPieChart.destroy();
+    window.discPieChart = new Chart(pieCanvas.getContext('2d'), {
+      type: 'pie',
+      data: {
+        labels: ['Stage 1', 'Stage 2', 'Stage 3', 'Stage 4', 'ปิดแล้ว'],
+        datasets: [{
+          data: [stats.stage1 || 0, stats.stage2 || 0, stats.stage3 || 0, stats.stage4 || 0, stats.closed || 0],
+          backgroundColor: ['#fbbf24', '#fb923c', '#3b82f6', '#ef4444', '#6b7280']
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'right', labels: { font: { size: 11 } } }, title: { display: true, text: 'สัดส่วนเคสตาม Stage' } }
+      }
+    });
+  }
+
+  const byRoom = {};
+  cases.forEach(c => {
+    if (c.stage === 'closed') return;
+    const room = c.classroom_name || c.classroom_id;
+    byRoom[room] = (byRoom[room] || 0) + 1;
+  });
+  const sortedRooms = Object.keys(byRoom).sort((a, b) => byRoom[b] - byRoom[a]).slice(0, 10);
+  const counts = sortedRooms.map(r => byRoom[r]);
+
+  const barCanvas = document.getElementById('disc-bar-chart');
+  if (barCanvas) {
+    if (window.discBarChart) window.discBarChart.destroy();
+    window.discBarChart = new Chart(barCanvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: sortedRooms.length ? sortedRooms : ['ไม่มีข้อมูล'],
+        datasets: [{ label: 'จำนวนเคส (active)', data: counts.length ? counts : [0], backgroundColor: '#1e40af' }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+        plugins: { legend: { display: false }, title: { display: true, text: 'Top 10 ห้องที่มีเคสมากที่สุด (ไม่รวมปิดแล้ว)' } },
+        scales: { x: { beginAtZero: true, ticks: { precision: 0 } } }
+      }
+    });
+  }
+}
+
+async function exportDisciplineCsv() {
+  $.LoadingOverlay("show", { text: "กำลังสร้าง CSV..." });
+  try {
+    const filter = {
+      stage: discState.currentStage,
+      classroom: $("#disc-classroom").val() || "",
+      search: $("#disc-search").val() || ""
+    };
+    const res = await runGoogleScript('getDisciplineCases', filter);
+    if (res.status !== 'success') throw new Error(res.message);
+
+    const cases = res.data.cases || [];
+    if (cases.length === 0) return Swal.fire('ไม่มีข้อมูล', 'ไม่มีเคสให้ export', 'warning');
+
+    const headers = ['เลขเคส', 'รหัสนักเรียน', 'ชื่อ-สกุล', 'ห้อง', 'Stage', 'สถานะ',
+                     'ทริกเกอร์', 'เลขตักเตือน', 'เลขทัณฑ์บน', 'เลขกิจกรรม', 'เลขแจ้ง ผปค.',
+                     'ผอ.เซ็น', 'ผปค.เซ็น', 'นร.เซ็น', 'สร้างเมื่อ', 'อัปเดตเมื่อ'];
+
+    const stageLabel = (st) => st === 'closed' ? 'ปิดแล้ว' : 'Stage ' + st;
+    const fmtTs = (ts) => ts ? String(ts).replace('T', ' ').substring(0, 19) : '';
+
+    const rows = cases.map(c => [
+      c.case_id, c.student_id, c.student_name, c.classroom_name || c.classroom_id,
+      stageLabel(c.stage), c.status, c.trigger,
+      c.warn_doc_no || '', c.bond_doc_no || '', c.activity_doc_no || '', c.parent_doc_no || '',
+      c.signed_director_at ? '✓' : '', c.signed_parent_at ? '✓' : '', c.signed_student_at ? '✓' : '',
+      fmtTs(c.created_at), fmtTs(c.updated_at)
+    ]);
+
+    const escapeCsv = (v) => {
+      const s = String(v == null ? '' : v);
+      return (s.includes(',') || s.includes('"') || s.includes('\n')) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+
+    const csvContent = '\ufeff' + [headers, ...rows].map(row => row.map(escapeCsv).join(',')).join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const fname = `discipline_cases_${new Date().toISOString().split('T')[0]}.csv`;
+    link.href = URL.createObjectURL(blob);
+    link.download = fname;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+
+    Swal.fire({ icon: 'success', title: 'Export สำเร็จ', html: `${cases.length} เคส<br><small class="text-gray-500">${fname}</small>`, timer: 2000, showConfirmButton: false });
+  } catch (err) {
+    console.error('exportDisciplineCsv:', err);
+    Swal.fire('ผิดพลาด', err.message, 'error');
+  } finally {
+    $.LoadingOverlay("hide");
+  }
+}
+
+async function syncDisciplineNow() {
+  const confirm = await Swal.fire({
+    title: 'Sync เคสจากสัปดาห์นี้?',
+    html: 'ระบบจะประเมินสัปดาห์ปัจจุบันและสร้างเคสอัตโนมัติ<br><small class="text-gray-500">(อาจใช้เวลาสักครู่หากมีข้อมูลเยอะ)</small>',
+    icon: 'question', showCancelButton: true, confirmButtonText: 'Sync', cancelButtonText: 'ยกเลิก'
+  });
+  if (!confirm.isConfirmed) return;
+
+  $.LoadingOverlay("show", { text: "กำลัง Sync และประมวลผลข้อมูล..." });
+  
+  try {
+    const week = getWeekDates(TODAY);
+    const teacher = JSON.parse(localStorage.getItem("teacher") || "{}");
+    
+    // ✅ เปลี่ยนมาใช้ google.script.run ตรงๆ เพื่อเอา Timeout 15 วิ ออก
+    google.script.run
+      .withSuccessHandler(function(res) {
+        $.LoadingOverlay("hide");
+        
+        if (res.status !== 'success') {
+          Swal.fire('ผิดพลาด', res.message, 'error');
+          return;
+        }
+
+        const { created, advanced } = res.data;
+        Swal.fire({
+          icon: 'success', 
+          title: 'Sync สำเร็จ',
+          html: `สร้างเคสใหม่: ${created.length}<br>ยกระดับ Stage: ${advanced.length}<br>ประมวลผลทั้งหมด: ${res.data.totalProcessed} คน`,
+          confirmButtonText: 'ตกลง'
+        }).then(() => loadDisciplineCases());
+      })
+      .withFailureHandler(function(err) {
+        $.LoadingOverlay("hide");
+        Swal.fire('ผิดพลาด', err.message || 'การเชื่อมต่อขัดข้อง', 'error');
+      })
+      .syncDisciplineFromWeekly(week[0], week[4], teacher.username || 'system');
+      
+  } catch (err) {
+    $.LoadingOverlay("hide");
+    Swal.fire('ผิดพลาด', err.message, 'error');
+  }
+}
+
+async function openDisciplineCase(caseId) {
+  discState.currentCaseId = caseId;
+  $.LoadingOverlay("show");
+  try {
+    const res = await runGoogleScript('getDisciplineCaseDetail', caseId);
+    if (res.status !== 'success') throw new Error(res.message);
+    discState.currentDetail = res.data;
+    renderCaseDetail(res.data);
+    $("#disc-detail-modal").css('display', 'flex');
+  } catch (err) {
+    Swal.fire('ผิดพลาด', err.message, 'error');
+  } finally {
+    $.LoadingOverlay("hide");
+  }
+}
+
+function renderCaseDetail(detail) {
+  const { case: c, logs, config, advisor } = detail;
+
+  if (config.warnings && config.warnings.length > 0) {
+    Swal.fire({
+      icon: 'warning', title: 'ยังไม่ได้ตั้งค่าครบ',
+      html: config.warnings.map(w => `<div class="text-sm">${w}</div>`).join(''),
+      confirmButtonText: 'รับทราบ'
+    });
+  }
+
+  $("#disc-detail-title").text(`${c.case_id} — ${c.student_name}`);
+  $("#disc-detail-sub").text(`ห้อง ${c.classroom_name} | Stage ${c.stage} | ${c.status}`);
+
+  const timeline = $("#disc-timeline").empty();
+  timeline.append(`
+    <div class="flex gap-3 items-start">
+      <div class="w-2 h-2 rounded-full bg-blue-600 mt-2 flex-shrink-0"></div>
+      <div class="flex-1">
+        <div class="text-sm font-bold">สร้างเคส (${c.trigger || 'auto'})</div>
+        <div class="text-xs text-gray-500">${c.created_at ? c.created_at.replace('T', ' ').substring(0, 16) : ''}</div>
+      </div>
+    </div>
+  `);
+  (logs || []).forEach(l => {
+    const icon = l.action === 'stage_advance' ? '🚀' : l.action === 'signed' ? '✍️' : l.action.startsWith('activity') ? '🎯' : '📌';
+    timeline.append(`
+      <div class="flex gap-3 items-start">
+        <div class="w-2 h-2 rounded-full bg-slate-600 mt-2 flex-shrink-0"></div>
+        <div class="flex-1">
+          <div class="text-sm font-bold">${icon} ${l.action}${l.stage_to ? ` → Stage ${l.stage_to}` : ''}</div>
+          <div class="text-xs text-gray-500">${l.created_at ? l.created_at.replace('T', ' ').substring(0, 16) : ''} ${l.actor ? '· ' + l.actor : ''}</div>
+          ${l.note ? `<div class="text-xs text-gray-600 italic mt-0.5">${l.note}</div>` : ''}
+        </div>
+      </div>
+    `);
+  });
+
+  const docs = $("#disc-docs").empty();
+  const docList = [
+    { type: 'warning', label: '📄 ตักเตือน', printed: c.printed_warning_at },
+    { type: 'bond', label: '📋 ทัณฑ์บน', printed: c.printed_bond_at },
+    { type: 'activity', label: '🎯 กิจกรรม', printed: c.printed_activity_at },
+    { type: 'parent', label: '📨 แจ้ง ผปค.', printed: c.printed_parent_at }
+  ];
+  docList.forEach(d => {
+    const printedBadge = d.printed ? '<div class="text-xs text-emerald-600 font-bold">✅ พิมพ์แล้ว</div>' : '<div class="text-xs text-gray-400">ยังไม่พิมพ์</div>';
+    docs.append(`
+      <button onclick="printDisciplineDoc('${d.type}')" class="p-3 bg-gray-50 hover:bg-blue-50 rounded-xl text-center font-bold text-sm active:scale-95">
+        ${d.label}${printedBadge}
+      </button>
+    `);
+  });
+
+  const sigs = $("#disc-signatures").empty();
+  if (c.stage === '2') {
+    const parties = [
+      { key: 'director', label: '👨‍💼 ผู้อำนวยการ', at: c.signed_director_at },
+      { key: 'parent', label: '👨‍👩‍👧 ผู้ปกครอง', at: c.signed_parent_at },
+      { key: 'student', label: '🎓 นักเรียน', at: c.signed_student_at },
+      { key: 'witness1', label: '📋 ครูที่ปรึกษา (พยาน)', at: c.signed_witness1_at },
+      { key: 'witness2', label: '📋 งานกิจการฯ (พยาน)', at: c.signed_witness2_at }
+    ];
+    parties.forEach(p => {
+      const signed = !!p.at;
+      const cls = signed ? 'bg-emerald-50 border-emerald-200' : 'bg-gray-50 border-gray-200';
+      const btn = signed
+        ? `<span class="text-xs text-emerald-700 font-bold">✅ เซ็นแล้ว</span>`
+        : `<button onclick="openSigModal('${p.key}')" class="px-2 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-bold">✍️ บันทึก</button>`;
+      sigs.append(`<div class="p-3 border-2 ${cls} rounded-xl"><div class="text-xs font-bold mb-1">${p.label}</div>${btn}</div>`);
+    });
+  } else {
+    sigs.append(`<div class="col-span-3 p-3 bg-gray-50 rounded-xl text-sm text-gray-500 text-center">การลงนามมีผลเฉพาะ Stage 2 (ทัณฑ์บน)</div>`);
+  }
+
+  const actSection = $("#disc-activity-section");
+  if (c.stage === '3') {
+    actSection.removeClass('hidden');
+    renderActivity(c.activity_data, c.activity_result);
+  } else {
+    actSection.addClass('hidden');
+  }
+
+  const parentSection = $("#disc-parent-section");
+  if (c.stage === '4') {
+    parentSection.removeClass('hidden');
+    if ($("#disc-meeting-date").length) {
+      if (!$("#disc-meeting-date")[0]._flatpickr) {
+        flatpickr("#disc-meeting-date", { dateFormat: "Y-m-d", locale: "th" });
+      }
+      if (c.meeting_date) {
+        $("#disc-meeting-date")[0]._flatpickr.setDate(c.meeting_date);
+      } else {
+        const defaultDate = new Date(Date.now() + 7 * 86400000);
+        $("#disc-meeting-date")[0]._flatpickr.setDate(defaultDate);
+      }
+    }
+    $("#disc-meeting-time").val(c.meeting_time || '09:00');
+    $("#disc-meeting-loc").val(c.meeting_location || '');
+
+    const $btn = $("#disc-meeting-save");
+    if (c.meeting_date && c.meeting_time && c.meeting_location) {
+      $btn.html('✅ อัปเดตการนัดประชุม').removeClass('bg-blue-700').addClass('bg-emerald-700');
+    } else {
+      $btn.html('💾 บันทึกการนัด').removeClass('bg-emerald-700').addClass('bg-blue-700');
+    }
+  } else {
+    parentSection.addClass('hidden');
+  }
+
+  $("#disc-btn-advance").toggle(c.stage !== 'closed' && c.stage !== '4');
+  $("#disc-btn-close").toggle(c.stage !== 'closed');
+}
+
+function renderActivity(activityData, result) {
+  const container = $("#disc-activity").empty();
+  if (!activityData || !activityData.items) {
+    container.append('<div class="text-sm text-gray-400">ไม่มีกิจกรรม</div>');
+    return;
+  }
+  activityData.items.forEach(it => {
+    const pct = it.target > 0 ? Math.min(100, (it.progress / it.target) * 100) : 0;
+    container.append(`
+      <div class="p-3 bg-gray-50 rounded-xl">
+        <div class="flex justify-between items-center mb-1">
+          <span class="text-sm font-bold">${escapeHtml(it.label)}</span>
+          <span class="text-sm">${it.progress || 0}/${it.target} ${it.unit || ''}</span>
+        </div>
+        <div class="w-full bg-gray-200 rounded-full h-2 mb-2">
+          <div class="bg-blue-600 h-2 rounded-full" style="width: ${pct}%"></div>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="updateActivity('${it.id}', -1)" class="px-2 py-1 bg-gray-200 rounded-lg text-xs font-bold">−</button>
+          <button onclick="updateActivity('${it.id}', 1)" class="px-2 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-bold">+</button>
+        </div>
+      </div>
+    `);
+  });
+  if (result === 'pass') container.append('<div class="p-2 bg-emerald-100 text-emerald-700 rounded-xl text-center font-bold">✅ ผ่านกิจกรรม</div>');
+  if (result === 'fail') container.append('<div class="p-2 bg-rose-100 text-rose-700 rounded-xl text-center font-bold">❌ ไม่ผ่านกิจกรรม</div>');
+}
+
+async function updateActivity(itemId, delta) {
+  try {
+    const res = await runGoogleScript('updateActivityProgress', discState.currentCaseId, itemId, delta);
+    if (res.status !== 'success') throw new Error(res.message);
+    renderActivity(res.data.activity, discState.currentDetail.case.activity_result);
+  } catch (err) {
+    Swal.fire('ผิดพลาด', err.message, 'error');
+  }
+}
+
+async function markActivityResult(result) {
+  const label = result === 'pass' ? 'ผ่านกิจกรรม' : 'ไม่ผ่านกิจกรรม (จะยกระดับเป็น Stage 4)';
+  const confirm = await Swal.fire({ title: 'ยืนยัน?', text: label, icon: 'question', showCancelButton: true, confirmButtonText: 'ยืนยัน', cancelButtonText: 'ยกเลิก' });
+  if (!confirm.isConfirmed) return;
+
+  try {
+    const res = await runGoogleScript('markActivityResult', discState.currentCaseId, result);
+    if (res.status !== 'success') throw new Error(res.message);
+
+    if (result === 'fail') {
+      await runGoogleScript('advanceDisciplineStage', discState.currentCaseId, '4', 'ไม่ผ่านกิจกรรม', 'system');
+    } else {
+      await runGoogleScript('advanceDisciplineStage', discState.currentCaseId, 'closed', 'ผ่านกิจกรรม', 'system');
+    }
+    Swal.fire({ icon: 'success', title: 'บันทึกแล้ว', timer: 1500, showConfirmButton: false })
+      .then(() => { $("#disc-detail-modal").hide(); loadDisciplineCases(); });
+  } catch (err) {
+    Swal.fire('ผิดพลาด', err.message, 'error');
+  }
+}
+
+async function advanceStageClick() {
+  const c = discState.currentDetail.case;
+  const nextMap = { '1': '2', '2': '3', '3': '4' };
+  const next = nextMap[c.stage];
+  if (!next) return Swal.fire('ไม่สามารถยกระดับได้', '', 'warning');
+
+  const notes = {
+    '2': 'ฝ่าฝืนซ้ำหลังตักเตือน',
+    '3': 'ฝ่าฝืนซ้ำหลังทำทัณฑ์บน',
+    '4': 'ไม่ผ่านกิจกรรม'
+  };
+  const confirm = await Swal.fire({
+    title: `ยกระดับเป็น Stage ${next}?`,
+    html: `<div class="text-sm">${notes[next] || ''}</div>`,
+    icon: 'question', showCancelButton: true, confirmButtonText: 'ยกระดับ', cancelButtonText: 'ยกเลิก'
+  });
+  if (!confirm.isConfirmed) return;
+
+  try {
+    const teacher = JSON.parse(localStorage.getItem("teacher") || "{}");
+    const res = await runGoogleScript('advanceDisciplineStage', c.case_id, next, notes[next], teacher.username || 'system');
+    if (res.status !== 'success') throw new Error(res.message);
+    Swal.fire({ icon: 'success', title: 'ยกระดับแล้ว', timer: 1200, showConfirmButton: false })
+      .then(() => { $("#disc-detail-modal").hide(); loadDisciplineCases(); });
+  } catch (err) {
+    const isLock = err.message && (err.message.includes('ไม่สามารถ') || err.message.includes('ต้องรอ') || err.message.includes('ขาดการลงนาม'));
+    Swal.fire({ icon: isLock ? 'warning' : 'error', title: isLock ? '🔒 ไม่สามารถยกระดับได้' : 'ผิดพลาด', html: `<div class="text-sm">${err.message}</div>` });
+  }
+}
+
+async function closeDisciplineCase(caseId) {
+  const confirm = await Swal.fire({ title: 'ปิดเคส?', text: 'เคสจะถูกปิด (ไม่ลบ)', icon: 'question', showCancelButton: true, confirmButtonText: 'ปิดเคส', cancelButtonText: 'ยกเลิก' });
+  if (!confirm.isConfirmed) return;
+  try {
+    const teacher = JSON.parse(localStorage.getItem("teacher") || "{}");
+    const res = await runGoogleScript('advanceDisciplineStage', caseId, 'closed', 'ปิดเคส', teacher.username || 'system');
+    if (res.status !== 'success') throw new Error(res.message);
+    Swal.fire({ icon: 'success', title: 'ปิดเคสแล้ว', timer: 1200, showConfirmButton: false })
+      .then(() => { $("#disc-detail-modal").hide(); loadDisciplineCases(); });
+  } catch (err) {
+    Swal.fire('ผิดพลาด', err.message, 'error');
+  }
+}
+
+function openSigModal(party) {
+  $("#disc-sig-party").val(party).trigger('change');
+  $("#disc-sig-title").text(`✍️ บันทึกการลงนาม — ${party}`);
+  $("#disc-sig-modal").css('display', 'flex');
+}
+
+async function saveSignature() {
+  const party = $("#disc-sig-party").val();
+  const meta = {};
+  if (party === 'parent') {
+    meta.name = $("#disc-sig-parent-name").val();
+    meta.relation = $("#disc-sig-parent-rel").val();
+  }
+  try {
+    const res = await runGoogleScript('recordSignature', discState.currentCaseId, party, meta);
+    if (res.status !== 'success') throw new Error(res.message);
+    $("#disc-sig-modal").hide();
+    Swal.fire({ icon: 'success', title: 'บันทึกแล้ว', timer: 1200, showConfirmButton: false });
+    openDisciplineCase(discState.currentCaseId);
+  } catch (err) {
+    Swal.fire('ผิดพลาด', err.message, 'error');
+  }
+}
+
+async function saveMeetingInfo() {
+  const dateStr = $("#disc-meeting-date").val();
+  const timeStr = $("#disc-meeting-time").val() || '';
+  const loc = $("#disc-meeting-loc").val() || '';
+
+  if (!dateStr) return Swal.fire('แจ้งเตือน', 'กรุณาเลือกวันประชุม', 'warning');
+  if (!timeStr.trim()) return Swal.fire('แจ้งเตือน', 'กรุณาระบุเวลาประชุม', 'warning');
+  if (!loc.trim()) return Swal.fire('แจ้งเตือน', 'กรุณาระบุสถานที่ประชุม', 'warning');
+
+  $.LoadingOverlay("show", { text: "กำลังบันทึก..." });
+  try {
+    const res = await runGoogleScript('saveMeetingMeta', discState.currentCaseId, dateStr, timeStr, loc);
+    if (res.status !== 'success') throw new Error(res.message);
+    Swal.fire({ icon: 'success', title: 'บันทึกแล้ว', html: `📅 ${dateStr}<br>🕐 ${timeStr}<br>📍 ${loc}`, timer: 2000, showConfirmButton: false });
+    discState.currentDetail.case.meeting_date = dateStr;
+    discState.currentDetail.case.meeting_time = timeStr;
+    discState.currentDetail.case.meeting_location = loc;
+    const $btn = $("#disc-meeting-save");
+    $btn.html('✅ อัปเดตการนัดประชุม').removeClass('bg-blue-700').addClass('bg-emerald-700');
+  } catch (err) {
+    Swal.fire('ผิดพลาด', err.message, 'error');
+  } finally {
+    $.LoadingOverlay("hide");
+  }
+}
+
+// Print discipline doc + submitForApproval (Sprint 3)
+async function printDisciplineDoc(docType) {
+  $.LoadingOverlay("show", { text: "กำลังเตรียมเอกสาร..." });
+  try {
+    if (['bond', 'activity', 'parent'].includes(docType)) {
+      try {
+        await runGoogleScript('submitForApproval', discState.currentCaseId, docType);
+      } catch (e) { /* ignore */ }
+    }
+
+    const res = await runGoogleScript('getDisciplineDocHtml', discState.currentCaseId, docType);
+    if (res.status !== 'success') throw new Error(res.message);
+
+    const win = window.open('', '_blank');
+    if (!win) throw new Error('กรุณาอนุญาต Pop-up');
+    win.document.write(res.data.html);
+    win.document.close();
+  } catch (err) {
+    Swal.fire('ผิดพลาด', err.message, 'error');
+  } finally {
+    $.LoadingOverlay("hide");
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// END OF FILE
+// ═══════════════════════════════════════════════════════════════
+</script>
