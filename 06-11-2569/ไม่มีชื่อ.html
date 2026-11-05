@@ -1,0 +1,90 @@
+เพื่อที่จะให้รูปโปรไฟล์เปลี่ยนไปตามผู้ใช้งานที่ล็อกอินเข้ามา คุณต้องทำการเพิ่มฟิลด์เก็บรูปภาพในฐานข้อมูล (Google Sheets) และปรับแก้โค้ดทั้งฝั่ง Backend (รหัส.gs) และ Frontend (index.html และไฟล์สคริปต์) ครับ
+
+ทำตาม 3 ขั้นตอนนี้ได้เลยครับ:
+
+1. เพิ่มคอลัมน์ใน Google Sheets
+ในชีตชื่อ Teachers ให้เพิ่มคอลัมน์ที่ 7 (คอลัมน์ G) ตั้งชื่อหัวคอลัมน์ว่า imageUrl จากนั้นใส่ลิงก์รูปภาพของครูแต่ละคนลงไป (ถ้าใครไม่มีรูป ปล่อยว่างไว้ ระบบจะใช้รูปอีโมจิ 👨‍🏫 แทน)
+
+2. แก้ไขโค้ดฝั่ง Backend (รหัส.gs)
+คุณต้องแก้โค้ดในไฟล์ รหัส.gs เพื่อให้ระบบดึงข้อมูลรูปภาพ (ต่อจาก classroom_ids) ออกมาส่งให้หน้าเว็บ โดยแก้ใน 4 จุดนี้:
+
+จุดที่ 2.1: ตัวแปร HEADERS
+เพิ่ม 'imageUrl' ต่อท้าย classroom_ids ใน SHEET_NAMES.TEACHERS
+
+JavaScript
+  [SHEET_NAMES.TEACHERS]: ['id', 'name', 'username', 'password', 'status', 'classroom_ids', 'imageUrl'],
+จุดที่ 2.2: ฟังก์ชัน authenticateTeacher
+ดึงข้อมูลจาก teacher[6] ออกมาใส่ตัวแปร
+
+JavaScript
+    if (teacher) {
+      return createResponse('success', 'Authentication successful', {
+        id: teacher[0],
+        name: teacher[1],
+        username: teacher[2],
+        classroom_ids: teacher[5] ? teacher[5].split(',') : [],
+        imageUrl: teacher[6] ? teacher[6].toString().trim() : '' // <-- เพิ่มบรรทัดนี้
+      });
+จุดที่ 2.3: ฟังก์ชัน getInitialData
+ในส่วนของการประมวลผล Teachers
+
+JavaScript
+    // ประมวลผล Teachers
+    const teachers = data.teachers.length <= 1 ? [] : data.teachers.slice(1)
+      .filter(row => row.length >= 6)
+      .map(row => ({
+        id: row[0]?.toString().trim(),
+        name: row[1]?.toString().trim(),
+        username: row[2]?.toString().trim(),
+        password: row[3]?.toString().trim(),
+        status: row[4],
+        classroom_ids: row[5] ? row[5].toString().trim().split(',').map(id => id.trim()) : [],
+        imageUrl: row[6]?.toString().trim() || '' // <-- เพิ่มบรรทัดนี้
+      }));
+จุดที่ 2.4: ฟังก์ชัน getLoginData
+ในส่วนของ teacherData
+
+JavaScript
+    const teacherData = {
+      id: teacher[0]?.toString().trim(),
+      name: teacher[1]?.toString().trim(),
+      username: teacher[2]?.toString().trim(),
+      classroom_ids: teacher[5] ? teacher[5].toString().trim().split(',').map(id => id.trim()) : [],
+      imageUrl: teacher[6]?.toString().trim() || '' // <-- เพิ่มบรรทัดนี้
+    };
+3. แก้ไขโค้ดฝั่ง Frontend (index.html และ script_main.html)
+ในไฟล์ index.html
+เปลี่ยนโค้ดส่วน div แสดงรูปครูให้รองรับทั้ง <img/> และ <span> อีโมจิสำรอง:
+
+HTML
+<div class="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center border border-white/30 overflow-hidden relative">
+  <img id="teacher-profile-img" src="" alt="Profile" class="w-full h-full object-cover hidden">
+  <span id="teacher-profile-emoji" class="text-xl">👨‍🏫</span>
+</div>
+ในไฟล์ script_main.html
+ส่วนที่คุณจัดการข้อมูลตอน Login สำเร็จ ให้เพิ่มคำสั่งเพื่อเอารูปมาโชว์:
+
+JavaScript
+// ในจุดที่ Login สำเร็จ และทำการแสดงชื่อครู (เช่น document.getElementById('teacher-name').innerText = data.teacher.name;)
+// ให้เพิ่มโค้ดนี้เข้าไปเพื่อจัดการรูปภาพ:
+
+const profileImg = document.getElementById('teacher-profile-img');
+const profileEmoji = document.getElementById('teacher-profile-emoji');
+
+if (data.teacher.imageUrl && data.teacher.imageUrl.trim() !== '') {
+    // ถ้ามีรูป ให้แสดงรูป ซ่อนอีโมจิ
+    profileImg.src = data.teacher.imageUrl;
+    profileImg.classList.remove('hidden');
+    profileEmoji.classList.add('hidden');
+    
+    // เผื่อกรณีลิงก์รูปพัง ให้สลับกลับมาใช้อีโมจิ
+    profileImg.onerror = function() {
+        profileImg.classList.add('hidden');
+        profileEmoji.classList.remove('hidden');
+    };
+} else {
+    // ถ้าไม่มีรูประบุไว้ ให้แสดงอีโมจิตามเดิม
+    profileImg.classList.add('hidden');
+    profileEmoji.classList.remove('hidden');
+}
+ลองนำไปปรับใช้ดูนะครับ หากติดขัดในส่วนของไฟล์ script_main.html ตรงไหน สามารถส่งโค้ดส่วนนั้นมาให้ช่วยดูเพิ่มเติมได้เลยครับ!
