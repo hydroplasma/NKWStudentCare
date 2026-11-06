@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ระบบเช็คเขตพื้นที่</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/th.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+  <style>
+    body { background-color: #f5f7fa; font-family: sans-serif; }
+    .app-card { background-color: #ffffff; border-radius: 28px; box-shadow: 0 8px 24px rgba(0,0,0,0.04); }
+    input, select { border-radius: 20px !important; background-color: #f9fafb !important; border: 1px solid #e5e7eb !important; padding: 10px 16px !important; }
+    input:focus, select:focus { border-color: #2563eb !important; box-shadow: 0 0 0 3px rgba(37,99,235,0.2) !important; background-color: #fff !important; }
+    .score-slider { accent-color: #2563eb; }
+    .btn-save { background: linear-gradient(135deg, #2563eb, #1e40af); color: #fff; border-radius: 40px; padding: 12px 24px; font-weight: 700; box-shadow: 0 4px 12px rgba(37,99,235,0.3); }
+    .btn-save:active { transform: scale(0.96); }
+    .tab-btn { padding: 12px 20px; border-radius: 24px; font-weight: 700; color: #4b5563; transition: all 0.2s; background: transparent; }
+    .tab-btn.active { background-color: #2563eb; color: #fff; box-shadow: 0 6px 12px rgba(37,99,235,0.25); }
+    .existing-badge { background: #ecfdf5; color: #047857; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+  </style>
+</head>
+<body class="p-4">
+  <div class="max-w-6xl mx-auto">
+    <div class="app-card p-5 mb-4 flex justify-between items-center">
+      <div>
+        <h1 id="cleaning-header" class="text-lg font-bold text-slate-800">🧹 บันทึกเขตพื้นที่</h1>
+        <p id="cleaning-subheader" class="text-xs text-gray-500"></p>
+      </div>
+      <div id="existing-badge" class="existing-badge hidden">✏️ แก้ไขข้อมูลเดิม</div>
+    </div>
+
+    <div class="app-card p-5 mb-4">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 mb-1">📅 วันที่</label>
+          <input type="text" id="input-date" class="w-full" readonly>
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 mb-1">🏫 ห้องเรียน</label>
+          <select id="input-classroom" class="w-full bg-white">
+            <option value="">-- เลือกห้องเรียน --</option>
+          </select>
+        </div>
+      </div>
+
+      <h3 class="text-md font-bold text-slate-800 mb-2">📋 รายชื่อนักเรียน</h3>
+      <div class="overflow-x-auto rounded-2xl border border-gray-100 mb-4">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="bg-slate-800 text-white">
+              <th class="p-3 text-center">เลขที่</th>
+              <th class="p-3 text-left">ชื่อ-สกุล</th>
+              <th class="p-3 text-center">สถานะ</th>
+              <th class="p-3 text-left">หน้าที่</th>
+            </tr>
+          </thead>
+          <tbody id="student-table-body" class="bg-white">
+            <tr><td colspan="4" class="text-center p-6 text-gray-400">กรุณาเลือกห้องเรียน</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 class="text-md font-bold text-slate-800 mb-2">⭐ แบบประเมินคะแนน</h3>
+      <div id="criteria-container" class="space-y-3 mb-4"></div>
+
+      <button id="save-btn" class="w-full btn-save">💾 บันทึกข้อมูล</button>
+    </div>
+  </div>
+
+  <script>
+    var CONFIG = { classrooms: [], students: {}, criteria: [] };
+    function getLocalDateStr(d) {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    var TODAY = getLocalDateStr(new Date());
+    var PREFILL = { date: null, room: null };
+
+    function initThaiDatePicker(selector, defaultDate, onChangeCallback) {
+      const convertToBE = function(instance) {
+        if (instance.altInput && instance.altInput.value) {
+          const parts = instance.altInput.value.split(' ');
+          if (parts.length === 3 && !parts[2].includes('พ.ศ.')) {
+            const year = parseInt(parts[2], 10) + 543;
+            instance.altInput.value = `${parts[0]} ${parts[1]} ${year}`;
+          }
+        }
+      };
+
+      return flatpickr(selector, {
+        dateFormat: "Y-m-d",
+        altInput: true,
+        altFormat: "j F Y",
+        locale: "th",
+        defaultDate: defaultDate,
+        allowInput: false,
+        onReady: function(selectedDates, dateStr, instance) {
+          convertToBE(instance);
+        },
+        onChange: function(selectedDates, dateStr, instance) {
+          convertToBE(instance);
+          if (typeof onChangeCallback === 'function') {
+            onChangeCallback(selectedDates, dateStr, instance);
+          }
+        }
+      });
+    }
+
+    function getGoogleScript() {
+      if (typeof google !== 'undefined' && google.script) return google.script.run;
+      if (window.parent && window.parent.google && window.parent.google.script) return window.parent.google.script.run;
+      return null;
+    }
+
+    $(document).ready(function () {
+      // อ่าน URL params
+      const params = new URLSearchParams(window.location.search);
+      PREFILL.date = params.get('date');
+      PREFILL.room = params.get('room');
+
+      initThaiDatePicker("#input-date", PREFILL.date || TODAY, null);
+
+      // ตรวจ login
+      let teacherData = localStorage.getItem('teacher');
+      if (!teacherData && window.parent) {
+        teacherData = window.parent.localStorage.getItem('teacher');
+      }
+      const teacher = JSON.parse(teacherData || '{}');
+      if (!teacher.username) {
+        Swal.fire({ icon: 'error', title: 'กรุณาล็อกอิน', text: 'ไม่พบข้อมูลผู้ใช้', allowOutsideClick: false });
+        return;
+      }
+
+      // Update header
+      if (PREFILL.room && PREFILL.date) {
+        const fmt = formatDateThai(PREFILL.date);
+        $("#cleaning-subheader").text(`${fmt} | ${PREFILL.room}`);
+      }
+
+      // Load config
+      const gasRun = getGoogleScript();
+      if (gasRun) {
+        gasRun.withSuccessHandler(function (res) {
+          if (res.status === 'success') {
+            CONFIG = res.data;
+            loadClassroomOptions();
+            loadCriteria();
+            applyPrefill();
+          } else {
+            Swal.fire('ผิดพลาด', res.message, 'error');
+          }
+        }).getCleaningConfig();
+      }
+    });
+    // ฟังก์ชันสลับสีปุ่มเช็คเขตพื้นที่
+    function selectCleaningStatus(btn) {
+      const row = $(btn).closest('tr');
+      const hiddenInput = row.find('.student-status-value');
+      const selectedStatus = $(btn).data('status');
+
+      // 1. อัปเดตค่าลง input ที่ซ่อนไว้
+      hiddenInput.val(selectedStatus);
+
+      // 2. รีเซ็ตปุ่มทั้งหมดในแถวให้เป็นสีเทา
+      row.find('.status-btn').removeClass('bg-emerald-500 text-white border-emerald-500 shadow-sm bg-rose-500 text-white border-rose-500 shadow-sm bg-blue-500 text-white border-blue-500 shadow-sm').addClass('bg-gray-50 text-gray-400 border-gray-200');
+
+      // 3. เปลี่ยนสีปุ่มที่ถูกกด
+      if (selectedStatus === 'ทำ') $(btn).removeClass('bg-gray-50 text-gray-400 border-gray-200').addClass('bg-emerald-500 text-white border-emerald-500 shadow-sm');
+      else if (selectedStatus === 'ไม่ทำ') $(btn).removeClass('bg-gray-50 text-gray-400 border-gray-200').addClass('bg-rose-500 text-white border-rose-500 shadow-sm');
+      else if (selectedStatus === 'ลา') $(btn).removeClass('bg-gray-50 text-gray-400 border-gray-200').addClass('bg-blue-500 text-white border-blue-500 shadow-sm');
+    }
+
+    function formatDateThai(dateStr) {
+      try {
+        if (!dateStr) return '';
+        const months = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+        const [y, m, d] = dateStr.split('-');
+        return `${parseInt(d)} ${months[parseInt(m) - 1]} ${parseInt(y) + 543}`;
+      } catch (e) { return dateStr; }
+    }
+
+    function loadClassroomOptions() {
+      const sel = $('#input-classroom');
+      sel.find('option:not(:first)').remove();
+      (CONFIG.classrooms || []).forEach(c => {
+        sel.append(`<option value="${c.id}">${c.name}</option>`);
+      });
+    }
+
+    function loadCriteria() {
+      const container = $('#criteria-container');
+      container.empty();
+      (CONFIG.criteria || []).forEach(c => {
+        container.append(`
+          <div class="bg-blue-50 border border-blue-100 p-3 rounded-2xl">
+            <label class="block font-semibold text-slate-700 mb-1 text-sm">
+              ${c.name} <span class="text-xs text-gray-400 font-normal">(เต็ม ${c.max_score})</span>
+            </label>
+            <div class="flex items-center gap-4">
+              <input type="range" min="0" max="${c.max_score}" value="0"
+                     class="score-slider flex-1 h-2 bg-gray-200 rounded-lg cursor-pointer" data-criterion="${c.name}">
+              <span class="score-value font-bold text-lg w-10 text-center text-blue-700">0</span>
+            </div>
+          </div>
+        `);
+      });
+
+      $('.score-slider').on('input', function () {
+        $(this).siblings('.score-value').text($(this).val());
+      });
+    }
+
+    function applyPrefill() {
+      if (!PREFILL.date) return;
+      $("#input-date").val(PREFILL.date);
+
+      if (PREFILL.room) {
+        // Client-side permission check; the server independently enforces this on save.
+        let teacherData = localStorage.getItem('teacher');
+        if (!teacherData && window.parent) teacherData = window.parent.localStorage.getItem('teacher');
+        const teacher = JSON.parse(teacherData || '{}');
+        const allowed = (Array.isArray(teacher.classroom_ids)
+          ? teacher.classroom_ids
+          : String(teacher.classroom_ids || '').split(','))
+          .map(s => String(s).trim()).filter(Boolean);
+
+        if (!allowed.includes(String(PREFILL.room).trim())) {
+          Swal.fire({
+            icon: 'error',
+            title: '🔒 ไม่มีสิทธิ์',
+            html: 'คุณไม่ใช่ครูที่ปรึกษาของห้องนี้<br><small class="text-gray-500">เฉพาะครูที่ปรึกษาเท่านั้นที่เช็คเขตพื้นที่ได้</small>',
+            allowOutsideClick: false,
+            confirmButtonText: 'ปิด'
+          }).then(() => {
+            if (window.parent && window.parent.$) window.parent.$('#cleaning-modal').hide();
+          });
+          $("#save-btn").prop('disabled', true).text('🔒 ไม่มีสิทธิ์บันทึก').css('opacity', 0.5);
+          return;
+        }
+
+        $("#input-classroom").val(PREFILL.room).prop('disabled', true).trigger('change');
+        setTimeout(() => loadExistingData(PREFILL.date, PREFILL.room), 300);
+      }
+    }
+
+    // Load students when classroom changes
+    $('#input-classroom').change(function () {
+      const roomId = $(this).val();
+      if (!roomId) {
+        $('#student-table-body').html('<tr><td colspan="4" class="text-center p-6 text-gray-400">กรุณาเลือกห้องเรียน</td></tr>');
+        return;
+      }
+
+      const students = CONFIG.students[roomId] || [];
+      const tbody = $('#student-table-body');
+      tbody.empty();
+
+      if (students.length === 0) {
+        tbody.append('<tr><td colspan="4" class="text-center p-6 text-gray-400">ไม่มีนักเรียนในห้องนี้</td></tr>');
+        return;
+      }
+
+      students.forEach(s => {
+        tbody.append(`
+          <tr class="border-b border-gray-50 hover:bg-blue-50/40">
+            <td class="p-3 text-center text-gray-600">${s.no}</td>
+            <td class="p-3 text-gray-800 font-medium">${s.name}</td>
+                        <td class="p-3 text-center align-middle">
+              <!-- ซ่อน Input ไว้เก็บค่าสถานะ -->
+              <input type="hidden" class="student-status-value" data-student-id="${s.student_id}" value="ทำ">
+              
+              <!-- ปุ่มกด 3 สถานะ สไตล์เดียวกับหน้าเช็คแถว -->
+              <div class="flex gap-1 status-btn-group flex-nowrap w-full">
+                <button type="button" class="status-btn flex-1 py-2 px-1 rounded-lg text-[11px] font-bold border transition-all active:scale-95 bg-emerald-500 text-white border-emerald-500 shadow-sm" data-status="ทำ" onclick="selectCleaningStatus(this)">ทำ</button>
+                <button type="button" class="status-btn flex-1 py-2 px-1 rounded-lg text-[11px] font-bold border transition-all active:scale-95 bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100" data-status="ไม่ทำ" onclick="selectCleaningStatus(this)">ไม่ทำ</button>
+                <button type="button" class="status-btn flex-1 py-2 px-1 rounded-lg text-[11px] font-bold border transition-all active:scale-95 bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100" data-status="ลา" onclick="selectCleaningStatus(this)">ลา</button>
+              </div>
+            </td>
+            <td class="p-3">
+              <input type="text" class="student-role w-full px-3 py-1.5 border border-gray-200 rounded-xl text-sm bg-white" placeholder="เช่น กวาดพื้น">
+            </td>
+          </tr>
+        `);
+      });
+    });
+
+    // Load existing data
+    function loadExistingData(date, classroomId) {
+      const gasRun = getGoogleScript();
+      if (!gasRun) return;
+
+      gasRun.withSuccessHandler(function (res) {
+        if (res.status === 'success' && res.data) {
+          const { studentData, scores, hasExisting } = res.data;
+
+          if (hasExisting) {
+            $("#existing-badge").removeClass('hidden');
+
+                        // Pre-fill students (สถานะ)
+            if (Array.isArray(studentData)) {
+              studentData.forEach(sd => {
+                const row = $(`.student-status-value[data-student-id="${sd.student_id}"]`).closest('tr');
+                if (row.length) {
+                  row.find('.student-role').val(sd.role || '');
+                  // จำลองการกดปุ่มเพื่อให้สีเปลี่ยนตามข้อมูลเก่า
+                  const btn = row.find(`.status-btn[data-status="${sd.status}"]`);
+                  if (btn.length) selectCleaningStatus(btn[0]);
+                }
+              });
+            }
+
+            // Pre-fill scores
+            if (scores && typeof scores === 'object') {
+              Object.keys(scores).forEach(key => {
+                const slider = $(`.score-slider[data-criterion="${key}"]`);
+                if (slider.length) slider.val(scores[key]).trigger('input');
+              });
+            }
+
+            Swal.fire({
+              icon: 'info',
+              title: 'พบข้อมูลที่บันทึกแล้ว',
+              text: 'แก้ไขแล้วกดบันทึกอีกครั้งเพื่ออัปเดต',
+              timer: 2200,
+              showConfirmButton: false
+            });
+          }
+        }
+      }).getCleaningDataForEdit(date, classroomId);
+    }
+
+    // Save
+    $('#save-btn').click(function () {
+      const date = $('#input-date').val();
+      const classroomId = $('#input-classroom').val();
+
+      let teacherData = localStorage.getItem('teacher');
+      if (!teacherData && window.parent) teacherData = window.parent.localStorage.getItem('teacher');
+      const teacher = JSON.parse(teacherData || '{}');
+      const checkerId = teacher.username || 'admin';
+
+      if (!date || !classroomId) {
+        Swal.fire('ผิดพลาด', 'กรุณาเลือกวันที่และห้องเรียน', 'warning');
+        return;
+      }
+
+      const studentData = [];
+            $('.student-status-value').each(function() {
+        const studentId = $(this).data('student-id');
+        const status = $(this).val(); // ดึงค่าจาก input ที่ซ่อนไว้
+        const role = $(this).closest('tr').find('.student-role').val();
+        const student = (CONFIG.students[classroomId] || []).find(s => String(s.student_id) === String(studentId));
+        studentData.push({
+          student_id: studentId,
+          name: student ? student.name : studentId,
+          status: status,
+          role: role || ''
+        });
+      });
+
+      const scores = {};
+      $('.score-slider').each(function () {
+        scores[$(this).data('criterion')] = parseInt($(this).val());
+      });
+
+      const payload = { date, classroom_id: classroomId, checker_id: checkerId, student_data: studentData, scores };
+
+      Swal.fire({ title: 'กำลังบันทึก...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+
+      const gasRun = getGoogleScript();
+      if (gasRun) {
+        gasRun.withSuccessHandler(function (res) {
+          Swal.close();
+          if (res.status === 'success') {
+            $("#existing-badge").removeClass('hidden');
+            Swal.fire({
+              icon: 'success',
+              title: 'สำเร็จ',
+              text: res.message || 'บันทึกเรียบร้อย',
+              timer: 1800,
+              showConfirmButton: false
+            }).then(() => {
+              if (window.parent && window.parent.$) {
+                window.parent.$('#cleaning-modal').hide();
+                if (window.parent.loadCleaningTable) window.parent.loadCleaningTable(date);
+              }
+            });
+          } else {
+            const code = res.error && res.error.code;
+            const isPerm = code === 'PERMISSION_DENIED';
+            const isAuth = code === 'AUTH_FAILED';
+            Swal.fire({
+              icon: 'error',
+              title: isPerm ? '🔒 ไม่มีสิทธิ์' : isAuth ? '🔒 บัญชีไม่ถูกต้อง' : 'ผิดพลาด',
+              text: res.message || 'ไม่สามารถบันทึกได้'
+            });
+          }
+        }).withFailureHandler(function (error) {
+          Swal.close();
+          Swal.fire('ผิดพลาด', (error && error.message) || 'ไม่สามารถบันทึกได้', 'error');
+        }).saveCleaningData(JSON.stringify(payload));
+
+      }
+    });
+  </script>
+</body>
+</html>

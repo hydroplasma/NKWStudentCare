@@ -1,0 +1,882 @@
+<!-- ═══════════════════════════════════════════════════════════════
+     LIB.HTML — Global CDN + CSS
+     Version: Sprint 1-4 Complete (2025-11-03)
+     ═══════════════════════════════════════════════════════════════ -->
+
+<!-- ===== FONTS ===== -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=TH+Sarabun+PSK:wght@400;700&display=swap" rel="stylesheet">
+
+<!-- ===== TAILWIND (CDN) ===== -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          sans: ['Sarabun', 'TH Sarabun PSK', 'sans-serif'],
+          thai: ['TH Sarabun PSK', 'Sarabun', 'sans-serif'],
+        },
+        colors: {
+          brand: {
+            50:  '#eff6ff',
+            100: '#dbeafe',
+            500: '#3b82f6',
+            600: '#2563eb',
+            700: '#1d4ed8',
+            800: '#1e40af',
+            900: '#1e3a8a',
+          }
+        }
+      }
+    }
+  }
+</script>
+
+<!-- ===== JQUERY ===== -->
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+<!-- ===== DATATABLES ===== -->
+<link rel="stylesheet" href="https://cdn.datatables.net/1.11.5/css/jquery.dataTables.min.css">
+<script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
+<link rel="stylesheet" href="https://cdn.datatables.net/responsive/2.2.9/css/responsive.dataTables.min.css">
+<script src="https://cdn.datatables.net/responsive/2.2.9/js/dataTables.responsive.min.js"></script>
+
+<!-- ===== JQUERY VALIDATION ===== -->
+<script src="https://cdn.jsdelivr.net/npm/jquery-validation@1.19.5/dist/jquery.validate.min.js"></script>
+
+<!-- ===== LOADING OVERLAY ===== -->
+<script src="https://cdn.jsdelivr.net/npm/gasparesganga-jquery-loading-overlay@2.1.7/dist/loadingoverlay.min.js"></script>
+
+<!-- ===== SWEETALERT2 ===== -->
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+<!-- ===== CHART.JS ===== -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<!-- ===== FLATPICKR (Date Picker) ===== -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/th.js"></script>
+
+<!-- ===== HTML2CANVAS (For Image Export) ===== -->
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+
+<!-- ===== JSPDF (For PDF Export) ===== -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<style>
+  /* ═══════════════════════════════════════════════════════════════
+     1. GLOBAL BASE
+     ═══════════════════════════════════════════════════════════════ */
+
+  :root {
+    --brand-50:  #eff6ff;
+    --brand-100: #dbeafe;
+    --brand-500: #3b82f6;
+    --brand-600: #2563eb;
+    --brand-700: #1d4ed8;
+    --brand-800: #1e40af;
+    --brand-900: #1e3a8a;
+    --slate-800: #1e293b;
+    --slate-900: #0f172a;
+  }
+
+  * { -webkit-tap-highlight-color: transparent; }
+  html, body {
+    overscroll-behavior-y: none; /* ป้องกันหน้าจอเด้งเวลาสไลด์สุดขอบ */
+  }
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    font-family: 'Sarabun', 'TH Sarabun PSK', sans-serif;
+    background-color: #f5f7fa;
+    min-height: 100vh;
+  }
+
+    @media (min-width: 768px) {
+    /* ซ่อนแถบเมนูบนมือถือเมื่อเปิดในคอม */
+    #bottom-nav {
+      display: none !important;
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     2. FORM ELEMENTS
+     ═══════════════════════════════════════════════════════════════ */
+
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    border-radius: 16px !important;
+    background-color: #f9fafb !important;
+    border: 1px solid #e5e7eb !important;
+    padding: 10px 16px !important;
+    font-size: 16px !important; /* ป้องกัน iOS zoom */
+    transition: all 0.15s ease;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]):focus,
+  select:focus,
+  textarea:focus {
+    background-color: #ffffff !important;
+    border-color: var(--brand-600) !important;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15) !important;
+    outline: none !important;
+  }
+
+  input:disabled, select:disabled {
+    background-color: #f3f4f6 !important;
+    color: #9ca3af !important;
+    cursor: not-allowed !important;
+  }
+
+  label.error {
+    color: #ef4444;
+    font-size: 0.875rem;
+    margin-top: 0.25rem;
+    display: block;
+  }
+  input.error, select.error, textarea.error {
+    border-color: #ef4444 !important;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     3. APP CARD & BUTTONS
+     ═══════════════════════════════════════════════════════════════ */
+
+  .app-card {
+    background-color: #ffffff;
+    border-radius: 28px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.04);
+    border: 1px solid rgba(0, 0, 0, 0.02);
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, var(--brand-700), var(--brand-800));
+    color: white;
+    border-radius: 40px;
+    padding: 12px 24px;
+    font-weight: 700;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+    transition: all 0.2s;
+    border: none;
+    cursor: pointer;
+  }
+  .btn-primary:active { transform: scale(0.96); }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .btn-save {
+    background: linear-gradient(135deg, var(--brand-700), var(--brand-800));
+    color: white;
+    border-radius: 40px;
+    padding: 12px 24px;
+    font-weight: bold;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+    transition: all 0.2s;
+    border: none;
+    cursor: pointer;
+  }
+  .btn-save:active { transform: scale(0.96); }
+
+  .btn-secondary {
+    background-color: #f3f4f6;
+    color: #374151;
+    border-radius: 40px;
+    padding: 12px 24px;
+    font-weight: 700;
+    border: 1px solid #e5e7eb;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-secondary:active { transform: scale(0.96); }
+
+  /* ═══════════════════════════════════════════════════════════════
+     4. DESKTOP NAVIGATION TABS
+     ═══════════════════════════════════════════════════════════════ */
+
+  .nav-tabs-container {
+    background-color: rgba(255, 255, 255, 0.9);
+    backdrop-filter: blur(12px);
+    padding: 6px;
+    border-radius: 28px;
+    display: flex;
+    overflow-x: auto;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    scrollbar-width: none;
+  }
+  .nav-tabs-container::-webkit-scrollbar { display: none; }
+
+  .nav-tab {
+    flex: 1;
+    text-align: center;
+    padding: 12px 16px;
+    border-radius: 24px;
+    font-size: 14px;
+    font-weight: 700;
+    color: #4b5563;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+  }
+  .nav-tab:hover { background: #f3f4f6; }
+  .nav-tab.active {
+    background-color: var(--brand-600);
+    color: white;
+    box-shadow: 0 6px 12px rgba(37, 99, 235, 0.25);
+  }
+
+  @media (min-width: 768px) {
+    .nav-tabs-container {
+      overflow-x: visible;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .nav-tab {
+      flex: 0 0 auto;
+      padding: 10px 18px;
+      font-size: 13px;
+    }
+  }
+
+    /* ═══════════════════════════════════════════════════════════════
+     BOTTOM NAV (ปรับเป็น Top Sticky Nav)
+     ═══════════════════════════════════════════════════════════════ */
+
+  .bottom-nav {
+    position: sticky; /* แทนที่ fixed ด้วย sticky เพื่อให้เลื่อนตามจอ */
+    top: 0;           /* ล็อกให้ติดขอบบนเมื่อเลื่อนผ่าน */
+    left: 0;
+    right: 0;
+    background: #ffffff;
+    border-bottom: 1px solid #e5e7eb; /* เปลี่ยนจาก border-top เป็นล่าง */
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    display: flex;
+    z-index: 45;
+    /* ลบ padding-bottom env(safe-area) ออก เพราะไม่ได้ติดล่างแล้ว */
+  }
+
+  .bottom-nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column; /* ถ้าอยากให้ไอคอนอยู่บน ข้อความอยู่ล่าง */
+    align-items: center;
+    justify-content: center;
+    padding: 10px 4px;
+    font-size: 11px;
+    color: #6b7280;
+    text-decoration: none;
+    transition: all 0.15s;
+    cursor: pointer;
+    border: none;
+    background: none;
+    gap: 2px;
+  }
+
+  .bottom-nav-item.active {
+    color: var(--brand-600);
+    background: var(--brand-50);
+    border-bottom: 3px solid var(--brand-600); /* เพิ่มเส้นใต้เพื่อบอกว่ากำลังใช้งาน */
+  }
+
+  .bottom-nav-item .icon {
+    font-size: 20px;
+    line-height: 1;
+  }
+
+  .bottom-nav-item .label {
+    font-weight: 700;
+  }
+
+  @media (min-width: 768px) {
+  /* ✅ บังคับซ่อน Bottom Nav + More Sheet บน Desktop (ทับ inline style จาก JS) */
+  #bottom-nav,
+  .bottom-nav {
+    display: none !important;
+  }
+
+  #more-overlay,
+  #more-sheet,
+  .more-sheet,
+  .more-sheet-overlay {
+    display: none !important;
+  }
+
+  body {
+    padding-bottom: 0 !important;
+  }
+
+  footer {
+    padding-bottom: 1rem !important;
+  }
+}
+
+  /* ═══════════════════════════════════════════════════════════════
+     6. MORE SHEET (BOTTOM SHEET)
+     ═══════════════════════════════════════════════════════════════ */
+
+  .more-sheet {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: #ffffff;
+    border-radius: 20px 20px 0 0;
+    box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.15);
+    transform: translateY(100%);
+    transition: transform 0.25s ease-out;
+    z-index: 45;
+    max-height: 70vh;
+    display: flex;
+    flex-direction: column;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+
+  .more-sheet.open { transform: translateY(0); }
+
+  .more-sheet-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s;
+    z-index: 44;
+  }
+
+  .more-sheet-overlay.open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     7. PROFILE AVATAR
+     ═══════════════════════════════════════════════════════════════ */
+
+  .profile-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    overflow: hidden;
+    background: linear-gradient(135deg, #3b82f6, #1e40af);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 20px;
+    flex-shrink: 0;
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+    border: 2px solid rgba(255, 255, 255, 0.4);
+  }
+
+  .profile-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     8. TAB CONTENT
+     ═══════════════════════════════════════════════════════════════ */
+
+  .tab-content {
+    display: none;
+    animation: fadeSlide 0.3s ease-out;
+  }
+
+  .tab-content.active { display: block; }
+
+  @keyframes fadeSlide {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     9. MODAL
+     ═══════════════════════════════════════════════════════════════ */
+
+  .modal {
+    display: none;
+    position: fixed;
+    z-index: 100;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(8px);
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+
+  .modal-content {
+    background: #ffffff;
+    border-radius: 32px;
+    max-width: 1200px;
+    width: 100%;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 25px 40px rgba(0, 0, 0, 0.2);
+    animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes slideUp {
+    from { transform: translateY(30px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     10. TABLES
+     ═══════════════════════════════════════════════════════════════ */
+
+  .table-responsive {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  th, td { padding: 14px 12px; }
+
+  thead th {
+    background-color: var(--brand-600);
+    color: white;
+    font-weight: 600;
+  }
+
+  tbody tr:hover { background-color: var(--brand-50); }
+
+  /* ═══════════════════════════════════════════════════════════════
+     11. STATUS BUTTONS (Attendance)
+     ═══════════════════════════════════════════════════════════════ */
+
+  .status-buttons {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .status-btn {
+    padding: 8px 16px;
+    border-radius: 40px;
+    font-size: 14px;
+    font-weight: 600;
+    border: 1px solid #e2e8f0;
+    background-color: white;
+    color: #1e293b;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    min-width: 64px;
+    text-align: center;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+  }
+
+  .status-btn.active {
+    border: none;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  }
+
+  .status-btn[data-status="มา"].active   { background: #22c55e; color: white; }
+  .status-btn[data-status="ขาด"].active  { background: #ef4444; color: white; }
+  .status-btn[data-status="สาย"].active  { background: #eab308; color: white; }
+  .status-btn[data-status="ลา"].active   { background: #3b82f6; color: white; }
+  .status-btn[data-status="ป่วย"].active { background: #a855f7; color: white; }
+
+  /* Row background by status */
+  .bg-present { background-color: #f0fdf4; }
+  .bg-absent  { background-color: #fef2f2; }
+  .bg-late    { background-color: #fefce8; }
+  .bg-leave   { background-color: #eff6ff; }
+  .bg-sick    { background-color: #faf5ff; }
+
+  /* ═══════════════════════════════════════════════════════════════
+     12. PERIOD BUTTONS
+     ═══════════════════════════════════════════════════════════════ */
+
+  .period-btn {
+    border-radius: 40px !important;
+    padding: 8px 20px !important;
+    font-weight: 600;
+    background-color: white;
+    color: #374151;
+    border: 1px solid #e2e8f0;
+    transition: all 0.2s;
+    cursor: pointer;
+  }
+
+  .period-btn.active {
+    background: linear-gradient(135deg, var(--brand-700) 0%, var(--brand-800) 100%) !important;
+    color: white !important;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
+    border: none;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     13. TOUCH TARGETS (Mobile friendly)
+     ═══════════════════════════════════════════════════════════════ */
+
+  .touch-btn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     14. MOBILE OPTIMIZATIONS
+     ═══════════════════════════════════════════════════════════════ */
+
+  @media (max-width: 767px) {
+    .app-card {
+      padding: 16px !important;
+      border-radius: 20px !important;
+    }
+
+    .modal-content {
+      max-height: 95vh !important;
+      padding: 12px !important;
+      border-radius: 20px !important;
+    }
+
+    table { font-size: 12px; }
+    th, td { padding: 8px 6px !important; }
+
+    .btn-primary, .btn-save, .btn-secondary {
+      min-height: 48px;
+      font-size: 15px !important;
+    }
+
+    /* Cards 2 columns on mobile */
+    .grid-cols-5 {
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
+
+    /* Reduce paddings */
+    .app-card p-5 { padding: 16px !important; }
+    .app-card p-6 { padding: 20px !important; }
+
+    /* Status buttons smaller */
+    .status-btn {
+      padding: 6px 12px;
+      font-size: 12px;
+      min-width: 52px;
+    }
+
+    .status-buttons { gap: 6px; }
+
+    /* Table scroll */
+    .table-responsive {
+      margin: 0 -16px;
+      padding: 0 16px;
+    }
+
+    /* Modal responsive */
+    .nav-tab { padding: 10px 12px; font-size: 12px; }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     15. DESKTOP IMPROVEMENTS
+     ═══════════════════════════════════════════════════════════════ */
+
+  @media (min-width: 768px) {
+    .container-desktop {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .app-card {
+      padding: 24px;
+    }
+
+    /* Hover effects only on desktop */
+    tbody tr:hover {
+      background-color: var(--brand-50);
+      transition: background-color 0.15s;
+    }
+
+    /* Sticky tables */
+    thead.sticky-top th {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     16. RESPONSIVE GRID UTILITIES
+     ═══════════════════════════════════════════════════════════════ */
+
+  .grid-responsive-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+  }
+
+  @media (max-width: 640px) {
+    .grid-responsive-cards {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     17. HIDE SCROLLBAR (for horizontal scrolling)
+     ═══════════════════════════════════════════════════════════════ */
+
+  .hide-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     18. FOOTER
+     ═══════════════════════════════════════════════════════════════ */
+
+  footer {
+    padding-bottom: calc(80px + env(safe-area-inset-bottom, 0));
+  }
+
+  @media (min-width: 768px) {
+    footer { padding-bottom: 1rem; }
+  }
+
+  footer a {
+    color: var(--brand-600);
+    text-decoration: none;
+  }
+
+  footer a:hover {
+    text-decoration: underline;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     19. ANIMATIONS
+     ═══════════════════════════════════════════════════════════════ */
+
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .animate-fade-in-up {
+    animation: fadeInUp 0.3s ease-out;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  .animate-pulse {
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     20. PRINT STYLES
+     ═══════════════════════════════════════════════════════════════ */
+
+  @media print {
+    .bottom-nav,
+    .more-sheet,
+    .more-sheet-overlay,
+    .nav-tabs-container,
+    #logout-btn,
+    button:not(.print-visible) {
+      display: none !important;
+    }
+
+    body {
+      padding-bottom: 0 !important;
+      background: white !important;
+    }
+
+    .app-card {
+      box-shadow: none !important;
+      border: 1px solid #e5e7eb !important;
+    }
+
+    .tab-content:not(.active) {
+      display: none !important;
+    }
+
+    .tab-content.active {
+      display: block !important;
+      page-break-inside: avoid;
+    }
+
+    table {
+      page-break-inside: auto;
+    }
+    tr {
+      page-break-inside: avoid;
+      page-break-after: auto;
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     21. FLATPICKR THEME OVERRIDE
+     ═══════════════════════════════════════════════════════════════ */
+
+  .flatpickr-day.selected,
+  .flatpickr-day.startRange,
+  .flatpickr-day.endRange {
+    background: var(--brand-600) !important;
+    border-color: var(--brand-600) !important;
+  }
+
+  .flatpickr-day:hover {
+    background: var(--brand-100) !important;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     22. SWEETALERT2 THEME OVERRIDE
+     ═══════════════════════════════════════════════════════════════ */
+
+  .swal2-popup {
+    border-radius: 24px !important;
+    font-family: 'Sarabun', sans-serif !important;
+  }
+
+  .swal2-title {
+    font-size: 1.25rem !important;
+    font-weight: 800 !important;
+    color: #1e293b !important;
+  }
+
+  .swal2-confirm {
+    border-radius: 20px !important;
+    padding: 10px 24px !important;
+    font-weight: 700 !important;
+    background: linear-gradient(135deg, var(--brand-700), var(--brand-800)) !important;
+  }
+
+  .swal2-cancel {
+    border-radius: 20px !important;
+    padding: 10px 24px !important;
+    font-weight: 700 !important;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     23. LOADING OVERLAY
+     ═══════════════════════════════════════════════════════════════ */
+
+  .loadingoverlay {
+    background: rgba(255, 255, 255, 0.85) !important;
+    backdrop-filter: blur(4px);
+  }
+
+  .loadingoverlay_element {
+    color: var(--brand-600) !important;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     24. CHART CONTAINER
+     ═══════════════════════════════════════════════════════════════ */
+
+  .chart-container {
+    position: relative;
+    height: 320px;
+    width: 100%;
+  }
+
+  @media (max-width: 640px) {
+    .chart-container { height: 260px; }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     25. ACCESSIBILITY
+     ═══════════════════════════════════════════════════════════════ */
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  /* Focus visible for keyboard navigation */
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  select:focus-visible {
+    outline: 2px solid var(--brand-600) !important;
+    outline-offset: 2px !important;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     26. UTILITY CLASSES
+     ═══════════════════════════════════════════════════════════════ */
+
+  .text-brand-600 { color: var(--brand-600) !important; }
+  .text-brand-700 { color: var(--brand-700) !important; }
+  .bg-brand-50    { background-color: var(--brand-50) !important; }
+  .bg-brand-100   { background-color: var(--brand-100) !important; }
+  .bg-brand-600   { background-color: var(--brand-600) !important; }
+  .bg-brand-700   { background-color: var(--brand-700) !important; }
+  .border-brand-200 { border-color: var(--brand-100) !important; }
+  .border-brand-500 { border-color: var(--brand-500) !important; }
+
+  /* Line clamp */
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Truncate */
+  .truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     27. iOS SAFE AREA
+     ═══════════════════════════════════════════════════════════════ */
+
+  @supports (padding: env(safe-area-inset-bottom)) {
+    body {
+      padding-bottom: calc(80px + env(safe-area-inset-bottom, 0));
+    }
+
+    @media (min-width: 768px) {
+      body { padding-bottom: env(safe-area-inset-bottom, 0); }
+    }
+  }
+   /* ═══════════════════════════════════════════════════════════════
+     28. CUSTOM STUDENT DASHBOARD (เพิ่มใหม่)
+     ═══════════════════════════════════════════════════════════════ */
+
+  /* ปรับแต่งตารางของนักเรียนให้ดูสะอาด (สีสลับแถว) */
+  #stu-daily tr:nth-child(even), 
+  #my-self-daily tr:nth-child(even) {
+    background-color: #f9fafb;
+  }
+  
+  /* ปรับความโค้งของ Modal ให้ดูทันสมัยขึ้น */
+  .modal-content { 
+    border-radius: 24px; 
+  }
+
+  /* เพิ่มความเนียนให้หลอด Progress Bar ในหน้านักเรียน */
+  #stu-score .rounded-full, 
+  #my-self-score .rounded-full {
+    transition: width 0.5s ease-in-out;
+  }
+
+</style>

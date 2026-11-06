@@ -1,0 +1,494 @@
+<script>
+    function loadPeriodStats() {
+        try {
+            console.log('Loading period stats');
+            const today = new Date().toISOString().split('T')[0];
+            const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+            
+            $("#period-stats-start-date").val(firstDayOfMonth);
+            $("#period-stats-end-date").val(today);
+            
+            $("#period-stats-period-buttons .period-btn").removeClass("active bg-indigo-600 text-white").addClass("text-gray-700 bg-white");
+            $("#period-stats-period-buttons .period-btn[data-period='morning']").addClass("active bg-indigo-600 text-white").removeClass("text-gray-700 bg-white");
+            
+            if (window.periodStatsPieChart) {
+                window.periodStatsPieChart.destroy();
+                window.periodStatsPieChart = null;
+            }
+            if (window.periodStatsBarChart) {
+                window.periodStatsBarChart.destroy();
+                window.periodStatsBarChart = null;
+            }
+            
+            $("#period-stats-summary-list").empty();
+            $("#period-stats-table-list").empty();
+            $("#period-stats-top-absent-list").empty();
+            
+            $("#period-stats-empty-dashboard").show();
+            $("#period-stats-summary-container").hide();
+            $("#period-stats-chart-container").hide();
+            $("#period-stats-table-container").hide();
+            $("#period-stats-top-absent-container").hide();
+            $("#period-stats-title").empty();
+            
+            updatePeriodStatsTitle();
+        } catch (error) {
+            console.error('Error in loadPeriodStats:', error);
+            Swal.fire({
+                icon: 'error',
+                title: 'ข้อผิดพลาด',
+                text: 'เกิดข้อผิดพลาดในการโหลดสรุปสถิติช่วงเวลา: ' + error.message,
+                confirmButtonText: 'ตกลง'
+            });
+        }
+    }
+
+    function updatePeriodStatsTitle() {
+        try {
+            const startDate = $("#period-stats-start-date").val();
+            const endDate = $("#period-stats-end-date").val();
+            const period = $("#period-stats-period-buttons .period-btn.active").data("period");
+            
+            if (!startDate || !endDate || !period) {
+                $("#period-stats-title").empty();
+                return;
+            }
+            
+            const periodName = PERIODS.find(p => p.id === period)?.name || period;
+            const schoolName = CONFIG.school_config.schoolName || 'โรงเรียน';
+            
+            $("#period-stats-title").html(`
+                สรุปสถิติการเช็คชื่อนักเรียน<br>
+                ${schoolName}<br>
+                ช่วง${periodName} ระหว่างวันที่ ${formatDateThai(startDate)} - ${formatDateThai(endDate)}
+            `);
+        } catch (error) {
+            console.error('Error in updatePeriodStatsTitle:', error);
+        }
+    }
+
+    async function loadPeriodStatsData() {
+        try {
+            const startDate = $("#period-stats-start-date").val();
+            const endDate = $("#period-stats-end-date").val();
+            const period = $("#period-stats-period-buttons .period-btn.active").data("period");
+            
+            console.log('=== Loading Period Stats Data ===');
+            console.log('Start Date:', startDate);
+            console.log('End Date:', endDate);
+            console.log('Period:', period);
+            
+            if (!startDate || !endDate) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'กรุณาเลือกวันที่',
+                    text: 'กรุณาเลือกวันที่เริ่มต้นและวันที่สิ้นสุด',
+                    confirmButtonText: 'ตกลง'
+                });
+                return;
+            }
+            
+            if (new Date(startDate) > new Date(endDate)) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'วันที่ไม่ถูกต้อง',
+                    text: 'วันที่เริ่มต้นต้องไม่มากกว่าวันที่สิ้นสุด',
+                    confirmButtonText: 'ตกลง'
+                });
+                return;
+            }
+            
+            if (!period) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'กรุณาเลือกช่วงเวลา',
+                    text: 'กรุณาเลือกช่วงเวลาที่ต้องการดูข้อมูล',
+                    confirmButtonText: 'ตกลง'
+                });
+                return;
+            }
+            
+            $.LoadingOverlay("show", { text: "กำลังโหลดข้อมูล..." });
+            
+            // Get classrooms
+            const classroomResponse = await runGoogleScript('getClassrooms', []);
+            if (classroomResponse.status !== 'success') {
+                throw new Error(classroomResponse.error?.details || 'Failed to load classrooms');
+            }
+            const allClassrooms = classroomResponse.data;
+            
+            // Get attendance range
+            const attendanceResponse = await runGoogleScript('getAttendanceRange', startDate, endDate, period);
+            if (attendanceResponse.status !== 'success') {
+                throw new Error(attendanceResponse.error?.details || 'Failed to load attendance data');
+            }
+            const attendanceData = attendanceResponse.data;
+            
+            if (attendanceData.length === 0) {
+                $.LoadingOverlay("hide");
+                Swal.fire({
+                    icon: 'info',
+                    title: 'ไม่พบข้อมูล',
+                    text: 'ไม่มีข้อมูลการเช็คชื่อในช่วงเวลาที่เลือก',
+                    confirmButtonText: 'ตกลง'
+                });
+                $("#period-stats-empty-dashboard").show();
+                $("#period-stats-summary-container").hide();
+                $("#period-stats-chart-container").hide();
+                $("#period-stats-table-container").hide();
+                $("#period-stats-top-absent-container").hide();
+                return;
+            }
+            
+            // Get students
+            const studentResponse = await runGoogleScript('getStudents', allClassrooms.map(c => c.id));
+            if (studentResponse.status !== 'success') {
+                throw new Error(studentResponse.error?.details || 'Failed to load students');
+            }
+            const studentsByClassroom = studentResponse.data;
+            
+            // Get top absent students
+            console.log('Calling getTopAbsentStudents with:', { startDate, endDate, period });
+            const topAbsentResponse = await runGoogleScript('getTopAbsentStudents', startDate, endDate, period, 20);
+            console.log('Top absent response:', topAbsentResponse);
+            
+            let topAbsentStudents = [];
+            if (topAbsentResponse.status === 'success') {
+                topAbsentStudents = topAbsentResponse.data || [];
+                console.log('Top absent students count:', topAbsentStudents.length);
+            } else {
+                console.warn('Failed to load top absent students:', topAbsentResponse.error?.details);
+            }
+            
+            // Calculate statistics
+            const statusCounts = {};
+            STATUS_LIST.forEach(status => {
+                statusCounts[status.label] = 0;
+            });
+            
+            const classroomStats = {};
+            let totalStudents = 0;
+            
+            allClassrooms.forEach(classroom => {
+                const studentCount = studentsByClassroom[classroom.id]?.length || 0;
+                totalStudents += studentCount;
+                classroomStats[classroom.id] = {
+                    name: classroom.name,
+                    studentCount: studentCount,
+                    counts: {},
+                    checkCount: 0
+                };
+                STATUS_LIST.forEach(status => {
+                    classroomStats[classroom.id].counts[status.label] = 0;
+                });
+            });
+            
+            // Group by room_id and date to get latest entry per day
+            const latestByRoomAndDate = {};
+            attendanceData.forEach(entry => {
+                const key = `${entry.room_id}_${entry.date}`;
+                if (!latestByRoomAndDate[key] || 
+                    new Date(entry.updated_at) > new Date(latestByRoomAndDate[key].updated_at)) {
+                    latestByRoomAndDate[key] = entry;
+                }
+            });
+            
+            // Count statistics from latest entries
+            Object.values(latestByRoomAndDate).forEach(entry => {
+                if (classroomStats[entry.room_id]) {
+                    classroomStats[entry.room_id].checkCount++;
+                }
+                
+                if (Array.isArray(entry.students)) {
+                    entry.students.forEach(student => {
+                        if (statusCounts[student.status] !== undefined) {
+                            statusCounts[student.status]++;
+                            if (classroomStats[entry.room_id]) {
+                                classroomStats[entry.room_id].counts[student.status]++;
+                            }
+                        }
+                    });
+                }
+            });
+            
+            updatePeriodStatsTitle();
+            updatePeriodStatsSummary(statusCounts, totalStudents);
+            updatePeriodStatsCharts(statusCounts);
+            updatePeriodStatsTable(classroomStats, allClassrooms);
+            updateTopAbsentStudents(topAbsentStudents);
+            
+            $("#period-stats-empty-dashboard").hide();
+            $("#period-stats-summary-container").show();
+            $("#period-stats-chart-container").show();
+            $("#period-stats-table-container").show();
+            
+            // Always show top absent container, even if empty
+            $("#period-stats-top-absent-container").show();
+            
+            console.log('All data loaded successfully');
+            $.LoadingOverlay("hide");
+        } catch (error) {
+            $.LoadingOverlay("hide");
+            console.error('Error in loadPeriodStatsData:', error);
+            Swal.fire({
+                icon: 'error',
+                title: 'ข้อผิดพลาด',
+                text: 'เกิดข้อผิดพลาดในการโหลดข้อมูล: ' + error.message,
+                confirmButtonText: 'ตกลง'
+            });
+        }
+    }
+
+    function updatePeriodStatsSummary(statusCounts, totalStudents) {
+        try {
+            const container = $("#period-stats-summary-list");
+            container.empty();
+            
+            const totalCard = `
+                <div class="p-4 text-center rounded-lg shadow-sm" style="background-color: ${lightenColor('#e5e7eb', 20)}; color: #374151;">
+                    <div class="flex items-center justify-center mb-2">
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                        </svg>
+                        <h3 class="text-sm font-medium">นักเรียนทั้งหมด</h3>
+                    </div>
+                    <p class="text-lg font-semibold">${totalStudents} คน</p>
+                    <p class="text-xs text-gray-500">(100%)</p>
+                </div>
+            `;
+            
+            const cards = STATUS_LIST.map(status => {
+                const count = statusCounts[status.label] || 0;
+                const percentage = totalStudents > 0 ? ((count / totalStudents) * 100).toFixed(2) : 0;
+                const hexColor = status.hexColor || '#000000';
+                const lighterColor = lightenColor(hexColor, 80);
+                const darkerColor = darkenColor(hexColor, 20);
+                return `
+                    <div class="p-4 text-center rounded-lg shadow-sm" style="background-color: ${lighterColor}; color: ${darkerColor};">
+                        <div class="flex items-center justify-center mb-2">
+                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+                            </svg>
+                            <h3 class="text-sm font-medium">${status.label}</h3>
+                        </div>
+                        <p class="text-lg font-semibold">${count} ครั้ง</p>
+                        <p class="text-xs text-gray-500">(${percentage}%)</p>
+                    </div>
+                `;
+            }).join('');
+            
+            container.append(`
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
+                    ${totalCard}
+                    ${cards}
+                </div>
+            `);
+        } catch (error) {
+            console.error('Error in updatePeriodStatsSummary:', error);
+        }
+    }
+
+    function updatePeriodStatsCharts(statusCounts) {
+        try {
+            const pieCanvas = document.getElementById('period-stats-pie-chart');
+            if (!pieCanvas) return;
+            
+            const pieCtx = pieCanvas.getContext('2d');
+            if (window.periodStatsPieChart) {
+                window.periodStatsPieChart.destroy();
+            }
+            
+            window.periodStatsPieChart = new Chart(pieCtx, {
+                type: 'pie',
+                data: {
+                    labels: STATUS_LIST.map(status => status.label),
+                    datasets: [{
+                        data: STATUS_LIST.map(status => statusCounts[status.label] || 0),
+                        backgroundColor: STATUS_LIST.map(status => status.hexColor)
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'right' },
+                        title: {
+                            display: true,
+                            text: 'สัดส่วนสถานะการเข้าเรียนในช่วงเวลาที่เลือก'
+                        }
+                    },
+                    layout: { padding: 10 }
+                }
+            });
+            
+            const barCanvas = document.getElementById('period-stats-bar-chart');
+            if (!barCanvas) return;
+            
+            const barCtx = barCanvas.getContext('2d');
+            if (window.periodStatsBarChart) {
+                window.periodStatsBarChart.destroy();
+            }
+            
+            window.periodStatsBarChart = new Chart(barCtx, {
+                type: 'bar',
+                data: {
+                    labels: STATUS_LIST.map(status => status.label),
+                    datasets: [{
+                        label: 'จำนวนครั้ง',
+                        data: STATUS_LIST.map(status => statusCounts[status.label] || 0),
+                        backgroundColor: STATUS_LIST.map(status => status.hexColor)
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        title: {
+                            display: true,
+                            text: 'จำนวนครั้งตามสถานะการเข้าเรียน'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: { precision: 0 }
+                        }
+                    },
+                    layout: { padding: { top: 10, bottom: 10 } }
+                }
+            });
+            
+            $('#period-stats-pie-chart').css({ 'width': '100%', 'height': '300px' });
+            $('#period-stats-bar-chart').css({ 'width': '100%', 'height': '300px' });
+        } catch (error) {
+            console.error('Error in updatePeriodStatsCharts:', error);
+        }
+    }
+
+    function updatePeriodStatsTable(classroomStats, allClassrooms) {
+        try {
+            const tableHead = $("#period-stats-table-thead");
+            const tableBody = $("#period-stats-table-list");
+            tableHead.empty();
+            tableBody.empty();
+            
+            const headers = `
+                <tr class="bg-gradient-to-r from-indigo-500 to-purple-500 text-white border-b border-gray-300">
+                    <th class="px-6 py-3 text-center text-xs font-medium uppercase tracking-wider rounded-tl-lg border-r border-gray-300">ห้องเรียน</th>
+                    <th class="px-6 py-3 text-center text-xs font-medium uppercase tracking-wider border-r border-gray-300">นักเรียน</th>
+                    <th class="px-6 py-3 text-center text-xs font-medium uppercase tracking-wider border-r border-gray-300">จำนวนวันที่เช็ค</th>
+                    ${STATUS_LIST.map(status => `
+                        <th class="px-1 py-1 text-center text-xs font-medium uppercase tracking-wider border-r border-gray-300">${status.label}</th>
+                    `).join('')}
+                </tr>
+            `;
+            tableHead.append(headers);
+            
+            const sortedClassrooms = allClassrooms
+                .map(classroom => ({
+                    ...classroom,
+                    stats: classroomStats[classroom.id]
+                }))
+                .sort((a, b) => a.name.localeCompare(b.name));
+            
+            sortedClassrooms.forEach((classroom, index) => {
+                const stats = classroom.stats || { studentCount: 0, checkCount: 0, counts: {} };
+                const isEven = index % 2 === 0;
+                const rowColor = isEven ? 'bg-gray-50' : 'bg-white';
+                
+                const row = `
+                    <tr class="${rowColor} hover:bg-gray-100 transition-colors border-b border-gray-200">
+                        <td class="px-6 py-4 text-center whitespace-nowrap border-r border-gray-200">${classroom.name}</td>
+                        <td class="px-6 py-4 text-center whitespace-nowrap border-r border-gray-200">${stats.studentCount}</td>
+                        <td class="px-6 py-4 text-center whitespace-nowrap border-r border-gray-200">${stats.checkCount}</td>
+                        ${STATUS_LIST.map(status => `
+                            <td class="px-1 py-1 text-center whitespace-nowrap border-r border-gray-200" style="color: ${darkenColor(status.hexColor, 20)};">${stats.counts[status.label] || 0}</td>
+                        `).join('')}
+                    </tr>
+                `;
+                tableBody.append(row);
+            });
+            
+            tableBody.find('tr td:last-child').removeClass('border-r');
+        } catch (error) {
+            console.error('Error in updatePeriodStatsTable:', error);
+        }
+    }
+
+    function updateTopAbsentStudents(topAbsentStudents) {
+        try {
+            console.log('updateTopAbsentStudents called with:', topAbsentStudents);
+            const tableBody = $("#period-stats-top-absent-list");
+            tableBody.empty();
+            
+            if (!topAbsentStudents || topAbsentStudents.length === 0) {
+                console.log('No top absent students data');
+                tableBody.append(`
+                    <tr>
+                        <td colspan="5" class="px-6 py-4 text-center text-gray-500">
+                            <div class="py-4">
+                                <svg class="w-12 h-12 mx-auto text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                <p class="text-lg font-medium">ไม่มีข้อมูลนักเรียนที่ขาดในช่วงเวลาที่เลือก</p>
+                                <p class="text-sm text-gray-400 mt-1">นักเรียนทุกคนมาเรียนครบทุกวัน</p>
+                            </div>
+                        </td>
+                    </tr>
+                `);
+                return;
+            }
+            
+            console.log('Rendering', topAbsentStudents.length, 'students');
+            
+            topAbsentStudents.forEach((student, index) => {
+                const rank = index + 1;
+                const isEven = index % 2 === 0;
+                const rowColor = isEven ? 'bg-red-50' : 'bg-white';
+                
+                // Highlight top 3
+                let rankStyle = '';
+                let medalIcon = '';
+                if (rank === 1) {
+                    rankStyle = 'font-bold text-red-600';
+                    medalIcon = '🥇';
+                } else if (rank === 2) {
+                    rankStyle = 'font-bold text-orange-600';
+                    medalIcon = '🥈';
+                } else if (rank === 3) {
+                    rankStyle = 'font-bold text-yellow-600';
+                    medalIcon = '🥉';
+                }
+                
+                const row = `
+                    <tr class="${rowColor} hover:bg-red-100 transition-colors border-b border-gray-200">
+                        <td class="px-6 py-4 text-center whitespace-nowrap border-r border-gray-200 ${rankStyle}">
+                            ${medalIcon} ${rank}
+                        </td>
+                        <td class="px-6 py-4 text-center whitespace-nowrap border-r border-gray-200">${student.classroom_name || '-'}</td>
+                        <td class="px-6 py-4 text-center whitespace-nowrap border-r border-gray-200">${student.no || '-'}</td>
+                        <td class="px-6 py-4 whitespace-nowrap border-r border-gray-200">${student.name || '-'}</td>
+                        <td class="px-6 py-4 text-center whitespace-nowrap ${rankStyle}">
+                            <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold bg-red-100 text-red-800">
+                                ${student.absent_count} ครั้ง
+                            </span>
+                        </td>
+                    </tr>
+                `;
+                tableBody.append(row);
+            });
+            
+            tableBody.find('tr td:last-child').removeClass('border-r');
+            console.log('Top absent students rendered successfully');
+        } catch (error) {
+            console.error('Error in updateTopAbsentStudents:', error);
+            Swal.fire({
+                icon: 'error',
+                title: 'ข้อผิดพลาด',
+                text: 'เกิดข้อผิดพลาดในการแสดงรายชื่อนักเรียน: ' + error.message,
+                confirmButtonText: 'ตกลง'
+            });
+        }
+    }
+</script>
