@@ -278,6 +278,30 @@ function requirePermission(username, roleList) {
   return role;
 }
 
+function createTeacherSession_(username) {
+  const sessionToken = Utilities.getUuid() + Utilities.getUuid().replace(/-/g, '');
+  CacheService.getScriptCache().put(
+    'TEACHER_SESSION_' + sessionToken,
+    String(username).trim(),
+    21600
+  );
+  return sessionToken;
+}
+
+function revokeTeacherSession(sessionToken) {
+  if (!sessionToken) return { status: 'success' };
+  CacheService.getScriptCache().remove('TEACHER_SESSION_' + String(sessionToken));
+  return { status: 'success' };
+}
+
+function getTeacherSessionActor_(sessionToken) {
+  if (!sessionToken) return null;
+  const username = CacheService.getScriptCache().get('TEACHER_SESSION_' + String(sessionToken));
+  if (!username) return null;
+  const actor = getActorInfo(username);
+  return actor && actor.type === 'teacher' ? { username, actor } : null;
+}
+
 function getStudentCouncilInfo(studentId) {
   try {
     const sheet = getOrCreateSheet(SHEET_NAMES.STUDENTS);
@@ -360,6 +384,7 @@ function loginTeacher(username, password) {
     id: String(teacher[0] || '').trim(),
     name: String(teacher[1] || '').trim(),
     username: String(teacher[2] || '').trim(),
+    sessionToken: createTeacherSession_(teacher[2]),
     classroom_ids: teacher[5] ? String(teacher[5]).split(',').map(s => s.trim()) : [],
     imageUrl: String(teacher[6] || '').trim(),
     phone: String(teacher[7] || '').trim(),
@@ -624,7 +649,21 @@ function getClassroomStudents(classroomId) {
 function formatDateStr(d) {
   if (!d) return '';
   if (d instanceof Date) return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  return String(d).trim().substring(0, 10);
+  const value = String(d).trim();
+  const isoMatch = value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:$|[T\s])/);
+  const dmyMatch = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const match = isoMatch
+    ? { year: Number(isoMatch[1]), month: Number(isoMatch[2]), day: Number(isoMatch[3]) }
+    : dmyMatch
+      ? { year: Number(dmyMatch[3]), month: Number(dmyMatch[2]), day: Number(dmyMatch[1]) }
+      : null;
+
+  if (match) {
+    const daysInMonth = new Date(match.year, match.month, 0).getDate();
+    if (match.month < 1 || match.month > 12 || match.day < 1 || match.day > daysInMonth) return '';
+    return `${String(match.year).padStart(4, '0')}-${String(match.month).padStart(2, '0')}-${String(match.day).padStart(2, '0')}`;
+  }
+  return value.substring(0, 10);
 }
 
 function getCleanedAttendanceRows(data) {
@@ -986,46 +1025,50 @@ function saveCleaningData(jsonData, spreadsheetMode = DEFAULT_SPREADSHEET_MODE) 
 
 function getCleaningStats(filter, spreadsheetMode = DEFAULT_SPREADSHEET_MODE) {
   try {
-    const { startDate, endDate, classroom_id } = filter;
+    filter = filter || {};
+    const startDate = formatDateStr(filter.startDate);
+    const endDate = formatDateStr(filter.endDate);
+    const classroomId = filter.classroom_id == null ? '' : String(filter.classroom_id).trim();
 
     const attSheet = getOrCreateSheet(CLEANING_SHEET_NAMES.ATTENDANCE, spreadsheetMode);
     const scoSheet = getOrCreateSheet(CLEANING_SHEET_NAMES.SCORES, spreadsheetMode);
     const tData = getOrCreateSheet(SHEET_NAMES.TEACHERS, spreadsheetMode).getDataRange().getValues();
 
-    const teacherMap = {};
+    const teacherMap = Object.create(null);
     tData.slice(1).forEach(row => {
-      const name = String(row[1]).trim();
-      const username = String(row[2]).trim();
+      const name = String(row[1] == null ? '' : row[1]).trim();
+      const username = String(row[2] == null ? '' : row[2]).trim();
       if (username) teacherMap[username] = name;
     });
 
     const cleanAtt = getCleanedCleaningRows(attSheet.getDataRange().getValues());
     const cleanSco = getCleanedCleaningRows(scoSheet.getDataRange().getValues());
 
-    const fmt = (d) => d instanceof Date ? Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(d || '').trim();
+    const fmt = formatDateStr;
 
     const fAtt = cleanAtt.filter(row => {
       if (row[0] === 'Date') return false;
       const d = fmt(row[0]);
-      const c = String(row[1]).trim();
-      return d >= startDate && d <= endDate && (!classroom_id || c === classroom_id);
+      const c = String(row[1] == null ? '' : row[1]).trim();
+      return d >= startDate && d <= endDate && (!classroomId || c === classroomId);
     });
 
     const fSco = cleanSco.filter(row => {
       if (row[0] === 'Date') return false;
       const d = fmt(row[0]);
-      const c = String(row[1]).trim();
-      return d >= startDate && d <= endDate && (!classroom_id || c === classroom_id);
+      const c = String(row[1] == null ? '' : row[1]).trim();
+      return d >= startDate && d <= endDate && (!classroomId || c === classroomId);
     });
 
-    const studentStats = {};
+    const studentStats = Object.create(null);
     fAtt.forEach(row => {
-      const roomId = String(row[1]).trim();
+      const roomId = String(row[1] == null ? '' : row[1]).trim();
       const students = JSON.parse(row[3] || '[]');
       students.forEach(stu => {
-        const sid = stu.student_id;
+        const sid = String(stu.student_id == null ? '' : stu.student_id).trim();
+        if (!sid) return;
         if (!studentStats[sid]) {
-          studentStats[sid] = { student_id: sid, name: stu.name || sid, classroom_id: roomId,
+          studentStats[sid] = { student_id: sid, name: String(stu.name || sid), classroom_id: roomId,
                                 total: 0, done: 0, not_done: 0, leave: 0 };
         }
         studentStats[sid].total++;
@@ -1036,7 +1079,9 @@ function getCleaningStats(filter, spreadsheetMode = DEFAULT_SPREADSHEET_MODE) {
     });
 
     const allStudents = Object.values(studentStats).sort((a, b) => {
-      if (a.classroom_id !== b.classroom_id) return a.classroom_id.localeCompare(b.classroom_id);
+      const roomA = String(a.classroom_id || '');
+      const roomB = String(b.classroom_id || '');
+      if (roomA !== roomB) return roomA.localeCompare(roomB);
       return String(a.student_id).localeCompare(String(b.student_id));
     });
 
@@ -1054,8 +1099,8 @@ function getCleaningStats(filter, spreadsheetMode = DEFAULT_SPREADSHEET_MODE) {
 
     const scoreDetails = fSco.map(row => ({
       date: fmt(row[0]),
-      classroom_id: row[1],
-      checker: teacherMap[String(row[2]).trim()] || String(row[2]).trim(),
+      classroom_id: String(row[1] == null ? '' : row[1]).trim(),
+      checker: teacherMap[String(row[2] == null ? '' : row[2]).trim()] || String(row[2] == null ? '' : row[2]).trim(),
       scores: JSON.parse(row[3] || '{}'),
       total_score: row[4]
     }));
@@ -1227,11 +1272,83 @@ function getTeacherSubjectSchedule(teacherEmail, targetDate) {
 function saveSubjectAttendance(jsonPayload) {
   try {
     const payload = JSON.parse(jsonPayload);
+    if (!payload || typeof payload !== 'object') {
+      return { status: 'error', message: 'ข้อมูลบันทึกไม่ถูกต้อง' };
+    }
 
-    // ✅ Council check
-    const actor = getActorInfo(payload.teacherEmail);
-    if (actor && actor.type === 'student_council') {
-      return { status: 'error', message: 'สภานักเรียนไม่มีสิทธิ์เช็คเข้าเรียน' };
+    const session = getTeacherSessionActor_(payload.sessionToken);
+    if (!session) {
+      return { status: 'error', message: 'เซสชันหมดอายุหรือไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่' };
+    }
+    const teacherUsername = session.username;
+    const actor = session.actor;
+    if (!hasPermission(actor.role, 'subject')) {
+      return { status: 'error', message: actor.type === 'student_council'
+        ? 'สภานักเรียนไม่มีสิทธิ์เช็คเข้าเรียน'
+        : 'ไม่มีสิทธิ์บันทึกการเข้าเรียน' };
+    }
+
+    const classroomId = String(payload.classroomId || '').trim();
+    if (!classroomId) {
+      return { status: 'error', message: 'ไม่พบรหัสห้องเรียน' };
+    }
+
+    const allowedStatuses = ['มา', 'ขาด', 'สาย', 'ลา', 'ป่วย'];
+    if (!Array.isArray(payload.students) || payload.students.length === 0) {
+      return { status: 'error', message: 'ไม่มีข้อมูลนักเรียนสำหรับบันทึก' };
+    }
+    const targetDate = String(payload.date || '').trim();
+    const targetCode = String(payload.subjectCode || '').trim();
+    const targetName = String(payload.subjectName || '').trim();
+    const targetGrade = String(payload.gradeLevel || '').trim();
+    const targetRoom = String(payload.room || '').trim();
+    if (!targetDate || (!targetCode && !targetName) || !targetGrade || !targetRoom) {
+      return { status: 'error', message: 'ข้อมูลวันที่หรือวิชาที่บันทึกไม่ครบ' };
+    }
+
+    const scheduleResult = getTeacherSubjectSchedule(teacherUsername, targetDate);
+    const assignedSchedule = scheduleResult && scheduleResult.status === 'success' &&
+      Array.isArray(scheduleResult.data) && scheduleResult.data.some(schedule =>
+        String(schedule.classroomId || '').trim() === classroomId &&
+        String(schedule.gradeLevel || '').trim() === targetGrade &&
+        String(schedule.room || '').trim() === targetRoom &&
+        (targetCode
+          ? String(schedule.subjectCode || '').trim() === targetCode
+          : String(schedule.subjectName || '').trim() === targetName)
+      );
+    if (!assignedSchedule) {
+      return { status: 'error', message: 'ไม่พบคาบสอนวิชานี้ในตารางสอนของคุณสำหรับห้องที่เลือก' };
+    }
+
+    const studentSheet = getOrCreateSheet(SHEET_NAMES.STUDENTS);
+    const studentRows = studentSheet.getDataRange().getDisplayValues();
+    const rosterById = new Map(
+      studentRows.slice(1)
+        .filter(row =>
+          String(row[0] || '').trim() === classroomId &&
+          String(row[4] || '').trim() === '1'
+        )
+        .map(row => [String(row[1] || '').trim(), String(row[3] || '').trim()])
+    );
+    const studentIds = new Set();
+    for (const student of payload.students) {
+      if (!student || typeof student !== 'object') {
+        return { status: 'error', message: 'ข้อมูลนักเรียนหรือสถานะเข้าเรียนไม่ถูกต้อง' };
+      }
+      const studentId = String(student.student_id || '').trim();
+      if (!studentId || !allowedStatuses.includes(String(student.status || ''))) {
+        return { status: 'error', message: 'ข้อมูลนักเรียนหรือสถานะเข้าเรียนไม่ถูกต้อง' };
+      }
+      if (studentIds.has(studentId)) {
+        return { status: 'error', message: 'พบรหัสนักเรียนซ้ำในข้อมูลบันทึก' };
+      }
+      if (!rosterById.has(studentId)) {
+        return { status: 'error', message: 'พบนักเรียนที่ไม่มีอยู่ในรายชื่อห้องนี้ กรุณาโหลดรายชื่อใหม่' };
+      }
+      studentIds.add(studentId);
+    }
+    if (studentIds.size !== rosterById.size) {
+      return { status: 'error', message: 'รายชื่อนักเรียนไม่ครบ กรุณาโหลดรายชื่อใหม่ก่อนบันทึก' };
     }
 
     const ss = getSpreadsheet();
@@ -1245,12 +1362,6 @@ function saveSubjectAttendance(jsonPayload) {
     if (!lock.tryLock(10000)) return { status: 'error', message: 'ระบบทำงานอยู่' };
 
     try {
-      const targetDate = String(payload.date || '').trim();
-      const targetCode = String(payload.subjectCode || '').trim();
-      const targetName = String(payload.subjectName || '').trim();
-      const targetGrade = String(payload.gradeLevel || '').trim();
-      const targetRoom = String(payload.room || '').trim();
-
       const data = sheet.getDataRange().getValues();
       const toDelete = [];
       for (let i = data.length - 1; i >= 1; i--) {
@@ -1270,8 +1381,9 @@ function saveSubjectAttendance(jsonPayload) {
       const timestamp = new Date();
       const toAdd = [];
       payload.students.forEach(stu => {
-        toAdd.push([timestamp, targetDate, targetCode, targetName, payload.teacherEmail,
-                    targetGrade, targetRoom, stu.student_id, stu.name, stu.status, stu.note || '']);
+        const studentId = String(stu.student_id).trim();
+        toAdd.push([timestamp, targetDate, targetCode, targetName, teacherUsername,
+                    targetGrade, targetRoom, studentId, rosterById.get(studentId), stu.status, stu.note || '']);
       });
       if (toAdd.length > 0) {
         sheet.getRange(sheet.getLastRow() + 1, 1, toAdd.length, toAdd[0].length).setValues(toAdd);
@@ -2260,7 +2372,37 @@ const DISCIPLINE_HEADERS = {
     'approval_status','approved_at','approved_by','approval_note'
   ],
   LOGS: ['log_id','case_id','action','stage_from','stage_to','actor','note','created_at']
-};
+}
+
+function getFormattedStudentId_(studentId, classroomId) {
+  const inputId = String(studentId == null ? '' : studentId).trim();
+  if (!inputId) return '';
+
+  const sheet = getSpreadsheet().getSheetByName(SHEET_NAMES.STUDENTS);
+  if (!sheet) {
+    Logger.log('Students sheet not found while formatting student ID.');
+    return inputId;
+  }
+
+  const rows = sheet.getDataRange().getDisplayValues().slice(1);
+  const exactMatches = rows.filter(row => String(row[1] || '').trim() === inputId);
+  if (exactMatches.length === 1) return String(exactMatches[0][1]).trim();
+  if (exactMatches.length > 1) {
+    Logger.log('Duplicate exact student ID found while formatting student ID.');
+    return inputId;
+  }
+
+  const normalizedId = normalizeBehaviorStudentId_(inputId);
+  const normalizedMatches = rows.filter(row =>
+    normalizeBehaviorStudentId_(row[1]) === normalizedId &&
+    (!classroomId || String(row[0] || '').trim() === String(classroomId).trim())
+  );
+  if (normalizedMatches.length === 1) return String(normalizedMatches[0][1]).trim();
+  if (normalizedMatches.length > 1) {
+    Logger.log('Ambiguous normalized student ID found while formatting student ID.');
+  }
+  return inputId;
+}
 
 function getDisciplineSheet(kind) {
   const ss = getSpreadsheet();
@@ -2361,18 +2503,53 @@ function getClassroomAdvisor(classroomId) {
   }
 }
 
+function getDisciplineViewer_(username) {
+  if (!username) return null;
+  const actor = getActorInfo(String(username).trim());
+  return actor && ['teacher', 'director', 'discipline'].includes(actor.role) ? actor : null;
+}
+
+function canAccessDisciplineClassroom_(actor, classroomId) {
+  if (!actor) return false;
+  if (actor.role === 'director' || actor.role === 'discipline') return true;
+  return actor.role === 'teacher' &&
+    (actor.classroom_ids || []).map(String).includes(String(classroomId));
+}
+
+function getDisciplineCaseRecords_() {
+  const data = getDisciplineSheet('CASES').getDataRange().getValues();
+  return data.slice(1).map(rowToCaseObj).filter(c => c.case_id);
+}
+
 function getDisciplineCases(filter) {
   try {
     filter = filter || {};
-    const sheet = getDisciplineSheet('CASES');
-    const data = sheet.getDataRange().getValues();
-    let cases = data.slice(1).map(rowToCaseObj).filter(c => c.case_id);
+    const actor = getDisciplineViewer_(filter.username);
+    if (!actor) {
+      return { status: 'error', message: 'ไม่มีสิทธิ์ดูเคสวินัย', data: { cases: [], stats: {} } };
+    }
+
+    let visibleCases = getDisciplineCaseRecords_()
+      .filter(c => canAccessDisciplineClassroom_(actor, c.classroom_id));
+    const stats = { stage1: 0, stage2: 0, stage3: 0, stage4: 0, closed: 0 };
+    visibleCases.forEach(c => {
+      const st = String(c.stage || '');
+      if (st === '1') stats.stage1++;
+      else if (st === '2') stats.stage2++;
+      else if (st === '3') stats.stage3++;
+      else if (st === '4') stats.stage4++;
+      else if (st === 'closed') stats.closed++;
+    });
+
+    let cases = visibleCases;
 
     if (filter.stage && filter.stage !== 'all') cases = cases.filter(c => c.stage === String(filter.stage));
-    if (filter.classroom) cases = cases.filter(c => c.classroom_id === filter.classroom);
+    if (filter.classroom) cases = cases.filter(c => c.classroom_id === String(filter.classroom));
     if (filter.search) {
       const q = String(filter.search).toLowerCase();
-      cases = cases.filter(c => c.student_name.toLowerCase().includes(q) || c.student_id.includes(q) || c.case_id.toLowerCase().includes(q));
+      cases = cases.filter(c => String(c.student_name || '').toLowerCase().includes(q) ||
+        String(c.student_id || '').toLowerCase().includes(q) ||
+        String(c.case_id || '').toLowerCase().includes(q));
     }
 
     const order = { '1': 0, '2': 1, '3': 2, '4': 3, 'closed': 4 };
@@ -2381,23 +2558,13 @@ function getDisciplineCases(filter) {
       return new Date(b.created_at) - new Date(a.created_at);
     });
 
-    const stats = { stage1: 0, stage2: 0, stage3: 0, stage4: 0, closed: 0 };
-    data.slice(1).forEach(r => {
-      const st = String(r[5] || '');
-      if (st === '1') stats.stage1++;
-      else if (st === '2') stats.stage2++;
-      else if (st === '3') stats.stage3++;
-      else if (st === '4') stats.stage4++;
-      else if (st === 'closed') stats.closed++;
-    });
-
     return { status: 'success', data: { cases, stats } };
   } catch (err) {
     return { status: 'error', message: err.toString(), data: { cases: [], stats: {} } };
   }
 }
 
-function getDisciplineCaseDetail(caseId) {
+function getDisciplineCaseDetail(caseId, username) {
   try {
     const sheet = getDisciplineSheet('CASES');
     const data = sheet.getDataRange().getValues();
@@ -2405,6 +2572,11 @@ function getDisciplineCaseDetail(caseId) {
     if (!row) return { status: 'error', message: 'ไม่พบเคส' };
 
     const caseData = rowToCaseObj(row);
+    caseData.student_id = getFormattedStudentId_(caseData.student_id, caseData.classroom_id);
+    const actor = getDisciplineViewer_(username);
+    if (!canAccessDisciplineClassroom_(actor, caseData.classroom_id)) {
+      return { status: 'error', message: 'ไม่มีสิทธิ์ดูเคสวินัย' };
+    }
     const cfg = getDisciplineConfig();
 
     const logSheet = getDisciplineSheet('LOGS');
@@ -2442,7 +2614,7 @@ function syncDisciplineFromWeekly(startDate, endDate, actor) {
     if (current.status !== 'success') throw new Error(current.message);
     const students = current.data.students || [];
 
-    const existing = getDisciplineCases({}).data.cases;
+    const existing = getDisciplineCaseRecords_();
     const activeCases = existing.filter(c => c.stage !== 'closed');
 
     const created = [], advanced = [];
@@ -3147,18 +3319,36 @@ function buildApprovalBlock(cData) {
 
 function formatThaiDateLong(ds) {
   if (!ds) return '...............';
-  const p = ds.split('-');
-  if (p.length !== 3) return ds;
+  const dateStr = formatDateStr(ds);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+  if (!match) return String(ds);
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
   const months = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
-  return `${parseInt(p[2])} ${months[parseInt(p[1]) - 1]} ${parseInt(p[0]) + 543}`;
+  if (month < 1 || month > 12 || day < 1 || day > new Date(year, month, 0).getDate()) return String(ds);
+  return `${day} ${months[month - 1]} ${year + 543}`;
 }
 
 function formatSignatureDate(timestamp) {
   if (!timestamp) return '......... / ......... / .........';
   try {
-    const d = new Date(timestamp);
+    if (timestamp instanceof Date) {
+      const dateStr = Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      const [year, month, day] = dateStr.split('-').map(Number);
+      return `${day} / ${month} / ${year + 543}`;
+    }
+
+    const raw = String(timestamp).trim();
+    const dateOnly = /^\d{4}-\d{1,2}-\d{1,2}$/.test(raw) || /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(raw);
+    const dateStr = dateOnly ? formatDateStr(raw) : '';
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+    if (match) return `${Number(match[3])} / ${Number(match[2])} / ${Number(match[1]) + 543}`;
+
+    const d = new Date(raw);
     if (isNaN(d.getTime())) return '......... / ......... / .........';
-    return `${d.getDate()} / ${d.getMonth() + 1} / ${d.getFullYear() + 543}`;
+    const localDate = Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd').split('-').map(Number);
+    return `${localDate[2]} / ${localDate[1]} / ${localDate[0] + 543}`;
   } catch (e) {
     return '......... / ......... / .........';
   }
@@ -3313,30 +3503,37 @@ function ensureDocNo(caseId, docType) {
   return { docNo, docDate };
 }
 
+function buildSignatureBlock_(title, name, position, signedAt) {
+  const signedDate = signedAt ? `<div>วันที่ ${formatSignatureDate(signedAt)}</div>` : '';
+  return `
+    <div style="display: flex; justify-content: flex-end; margin-top: 40px; width: 100%;">
+      <div style="width: 33.33%; text-align: center;">
+        <div style="margin-bottom: 30px;">${escapeBehaviorDocumentHtml_(title)}</div>
+        <div>ลงชื่อ .....................................................</div>
+        <div>(${escapeBehaviorDocumentHtml_(name)})</div>
+        <div>${escapeBehaviorDocumentHtml_(position)}</div>
+        ${signedDate}
+      </div>
+    </div>
+  `;
+}
+
 function buildWarningDocHtml(cData, cfg, advisor) {
   const { docNo, docDate } = ensureDocNo(cData.case_id, 'warning');
   const categoryLabel = getCategoryLabelFromTrigger(cData.trigger);
-  const categoryColor = getCategoryColorFromTrigger(cData.trigger);
 
   const body = `
     <div class="garuda-wrap">${getGarudaHtml(cfg)}</div>
     <div class="header">${cfg.school_name}</div>
-    <div class="header-sub">${cfg.school_name}</div>
     <div class="meta"><div>ที่ ${docNo}</div><div>${formatThaiDateLong(docDate)}</div></div>
     <div><strong>เรื่อง</strong> ตักเตือนเรื่องความประพฤติ</div>
     <div><strong>เรียน</strong> ${cData.student_name} ชั้น ${cData.classroom_name} เลขประจำตัว ${cData.student_id}</div>
     <div class="indent">
   ด้วย${cfg.school_name} ได้ติดตามพฤติกรรมของนักเรียนอย่างต่อเนื่อง พบว่านักเรียนมีผลการประเมินความประพฤติอยู่ในกลุ่ม <strong>"${categoryLabel}"</strong> ซึ่งต่ำกว่าเกณฑ์ที่โรงเรียนกำหนด
 </div>
-    <div class="indent">โรงเรียนจึงขอว่ากล่าวตักเตือนนักเรียนให้ปรับปรุงพฤติกรรม หากยังฝ่าฝืนอีก โรงเรียนจะดำเนินการตามระเบียบกระทรวงศึกษาธิการ ว่าด้วยการลงโทษนักเรียนและนักศึกษา พ.ศ. 2548 ต่อไป</div>
-    <div class="indent">จึงเรียนมาเพื่อโปรดทราบและปฏิบัติตาม</div>
-    <div class="signature">
-      <div>ขอแสดงความนับถือ</div>
-      <div style="margin-top: 40px;">ลงชื่อ .....................................................</div>
-      <div>(${advisor.name})</div>
-      <div>ครูที่ปรึกษา</div>
-      <div style="margin-top:6px;">วันที่ ${formatSignatureDate(cData.printed_warning_at)}</div>
-    </div>
+<div class="indent">โรงเรียนจึงขอว่ากล่าวตักเตือนนักเรียนให้ปรับปรุงพฤติกรรม หากยังฝ่าฝืนอีก โรงเรียนจะดำเนินการตามระเบียบกระทรวงศึกษาธิการ ว่าด้วยการลงโทษนักเรียนและนักศึกษา พ.ศ. 2548 ต่อไป</div>
+<div class="indent">จึงเรียนมาเพื่อโปรดทราบและปฏิบัติตาม</div>
+${buildSignatureBlock_('ขอแสดงความนับถือ', advisor.name, 'ครูที่ปรึกษา', cData.printed_warning_at)}
   `;
   return buildDocWrap('หนังสือตักเตือน', body);
 }
@@ -3376,12 +3573,7 @@ function buildBondDocHtml(cData, cfg, advisor) {
       </div>
     </div>
     <div class="indent">จึงเรียนมาเพื่อโปรดพิจารณาลงนามอนุมัติ</div>
-    <div style="text-align: right; margin-top: 30px;">
-      <div>ลงชื่อ ..................................................... พยาน</div>
-      <div>(${advisor.name})</div>
-      <div>ครูที่ปรึกษา</div>
-      <div style="margin-top: 6px;">วันที่ ${formatSignatureDate(cData.signed_witness1_at)}</div>
-    </div>
+    ${buildSignatureBlock_('ขอแสดงความนับถือ', advisor.name, 'ครูที่ปรึกษา')}
     <div class="page-break"></div>
   `;
 
@@ -3466,13 +3658,7 @@ function buildActivityDocHtml(cData, cfg, advisor) {
     <div class="indent"><strong>ระยะเวลาดำเนินการ:</strong> ตั้งแต่วันที่ ${act.start ? formatThaiDateLong(act.start) : '.........'} ถึง ${act.end ? formatThaiDateLong(act.end) : '.........'}</div>
     <div class="indent"><strong>ผู้ติดตามผล:</strong> ${advisor.name} ครูที่ปรึกษา</div>
     <div class="indent">ขอให้นักเรียนและผู้ปกครองให้ความร่วมมือในการดำเนินกิจกรรมตามที่กำหนด หากไม่ดำเนินการ โรงเรียนจะพิจารณาแจ้งผู้ปกครองและดำเนินการตามระเบียบวินัยต่อไป</div>
-    <div style="text-align: right; margin-top: 40px;">
-      <div>สั่ง ณ วันที่ ${formatThaiDateLong(docDate)}</div>
-      <div style="margin-top: 40px;">ลงชื่อ ..................................................... ผู้สั่ง</div>
-      <div>( ${cfg.director_name} )</div>
-      <div>${cfg.director_position}</div>
-      <div>${cfg.school_name}</div>
-    </div>
+    ${buildSignatureBlock_('สั่ง ณ วันที่ ' + formatThaiDateLong(docDate), cfg.director_name, cfg.director_position)}
     <div class="sig-row">
       <div>
         <div style="font-weight: bold;">รับทราบ</div>
@@ -3493,37 +3679,50 @@ function buildActivityDocHtml(cData, cfg, advisor) {
 
 function buildParentNoticeDocHtml(cData, cfg, advisor) {
   const { docNo, docDate } = ensureDocNo(cData.case_id, 'parent');
+
   const meetingDate = cData.meeting_date ? formatThaiDateLong(cData.meeting_date) : '...........................................';
   const meetingTime = cData.meeting_time || '........................';
   const meetingLoc = cData.meeting_location || '...........................................';
 
+  const refs = [];
+  if (cData.warn_doc_no) {
+    refs.push(`หนังสือตักเตือน เลขที่ ${cData.warn_doc_no} ลงวันที่ ${formatThaiDateLong(cData.warn_date)}`);
+  }
+  if (cData.bond_doc_no) {
+    refs.push(`บันทึกทัณฑ์บน เลขที่ ${cData.bond_doc_no} ลงวันที่ ${formatThaiDateLong(cData.bond_date)}`);
+  }
+  if (cData.activity_doc_no) {
+    refs.push(`คำสั่งมอบหมายกิจกรรม เลขที่ ${cData.activity_doc_no} ลงวันที่ ${formatThaiDateLong(cData.activity_date)}`);
+  }
+  const refText = refs.length
+    ? refs.map((ref, index) => `${index + 1}. ${ref}`).join('<br>')
+    : '......................................................................................................';
+
   const body = `
     <div class="garuda-wrap">${getGarudaHtml(cfg)}</div>
     <div class="header">${cfg.school_name}</div>
-    <div class="header-sub">${cfg.school_name}</div>
-    <div class="meta"><div>ที่ ${docNo}</div><div>${formatThaiDateLong(docDate)}</div></div>
+    <div class="meta" style="margin-top: 20px;"><div>ที่ ${docNo}</div><div style="margin-right: 1cm;">${formatThaiDateLong(docDate)}</div></div>
     <div><strong>เรื่อง</strong> ขอเชิญประชุมผู้ปกครองเพื่อหาแนวทางแก้ไขพฤติกรรมนักเรียน</div>
     <div><strong>เรียน</strong> ผู้ปกครองของ ${cData.student_name}</div>
-    <div class="indent">ด้วย${cfg.school_name} ได้ติดตามพฤติกรรมของ <strong>${cData.student_name}</strong> ชั้น ${cData.classroom_name} เลขประจำตัว ${cData.student_id} พบว่านักเรียนมีผลการประเมินอยู่ในกลุ่ม <strong>"ใกล้ชิด"</strong> ต่อเนื่องกัน และได้ผ่านกระบวนการลงโทษตามระเบียบแล้ว</div>
-    <div style="margin: 12px 0; padding-left: 1cm;">
-      <div>1. หนังสือตักเตือน เลขที่ ${cData.warn_doc_no || '.........'} ลงวันที่ ${cData.warn_date ? formatThaiDateLong(cData.warn_date) : '.........'}</div>
-      <div>2. บันทึกทัณฑ์บน เลขที่ ${cData.bond_doc_no || '.........'} ลงวันที่ ${cData.bond_date ? formatThaiDateLong(cData.bond_date) : '.........'}</div>
-      <div>3. คำสั่งมอบหมายกิจกรรม เลขที่ ${cData.activity_doc_no || '.........'} ลงวันที่ ${cData.activity_date ? formatThaiDateLong(cData.activity_date) : '.........'}</div>
+    <div style="display: flex; margin-top: 10px;">
+      <div style="width: 1.5cm; text-align: right;"><strong>อ้างถึง</strong></div>
+      <div style="flex: 1; padding-left: 0.5cm; line-height: 1.5;">${refText}</div>
     </div>
-    <div class="indent">แต่นักเรียนยังไม่สามารถดำเนินการตามเงื่อนไขได้สำเร็จ โรงเรียนจึงขอเชิญท่านเข้าร่วมประชุม</div>
-    <div style="margin: 12px 0; padding-left: 1cm;">
+    <div class="indent" style="margin-top: 20px;">
+      ด้วย ${cfg.school_name} ได้ติดตามพฤติกรรมของ <strong>${cData.student_name}</strong> ชั้น ${cData.classroom_name} เลขประจำตัว ${cData.student_id} พบว่านักเรียนมีผลการประเมินอยู่ในกลุ่ม <strong>"ใกล้ชิด"</strong> ต่อเนื่องกัน และได้ผ่านกระบวนการลงโทษตามระเบียบแล้ว
+    </div>
+    <div class="indent">
+      แต่นักเรียนยังไม่สามารถดำเนินการตามเงื่อนไขได้สำเร็จ โรงเรียนจึงขอเชิญท่านเข้าร่วมประชุม
+    </div>
+    <div style="margin: 15px 0 15px 2.5cm; line-height: 1.8;">
       <div><strong>วันประชุม:</strong> ${meetingDate}</div>
       <div><strong>เวลา:</strong> ${meetingTime}</div>
       <div><strong>สถานที่:</strong> ${meetingLoc}</div>
     </div>
-    <div class="indent">จึงเรียนมาเพื่อโปรดเข้าร่วมประชุมตามวันและเวลาดังกล่าว หากไม่สามารถมาได้ กรุณาติดต่อครูที่ปรึกษา ${advisor.name}${advisor.phone ? ' โทร. ' + advisor.phone : ''} เพื่อนัดหมายใหม่</div>
-    <div class="indent">ขอแสดงความนับถือ</div>
-    <div style="text-align: right; margin-top: 40px;">
-      <div>ลงชื่อ .....................................................</div>
-      <div>( ${cfg.director_name} )</div>
-      <div>${cfg.director_position}</div>
-      <div>${cfg.school_name}</div>
+    <div class="indent">
+      จึงเรียนมาเพื่อโปรดเข้าร่วมประชุมตามวันและเวลาดังกล่าว หากไม่สามารถมาได้ กรุณาติดต่อครูที่ปรึกษา ${advisor.name}${advisor.phone ? ' โทร. ' + advisor.phone : ''} เพื่อนัดหมายใหม่
     </div>
+    ${buildSignatureBlock_('ขอแสดงความนับถือ', cfg.director_name, cfg.director_position)}
     <div class="cut-line"></div>
     <div style="text-align: center; font-weight: bold; font-size: 18pt; margin: 20px 0;">✂️ ใบตอบรับ</div>
     <div style="text-align: right; margin-bottom: 10px;">เขียนที่ .........................................<br>วันที่ ......... / ......... / .........</div>
@@ -3629,19 +3828,14 @@ function buildBehaviorRecordDocHtml_(cData, cfg, advisor) {
     <div class="indent" style="margin-top: 15px;">
       จึงเรียนมาเพื่อโปรดทราบ และร่วมกันดูแลช่วยเหลือนักเรียนดังกล่าวให้มีพฤติกรรมที่พึงประสงค์และประสบความสำเร็จในการศึกษาเล่าเรียน
     </div>
-    <div class="signature" style="margin-top: 40px; text-align: center; width: 100%; margin-left: 0;">
-      <div style="text-align: center; margin-bottom: 30px;">ขอแสดงความนับถือ</div>
-      <div style="text-align: center;">ลงชื่อ .....................................................</div>
-      <div style="text-align: center;">(${escapeBehaviorDocumentHtml_(advisor.name)})</div>
-      <div style="text-align: center;">ครูที่ปรึกษา</div>
-    </div>
+    ${buildSignatureBlock_('ขอแสดงความนับถือ', advisor.name, 'ครูที่ปรึกษา')}
   `;
   return buildDocWrap('แจ้งข้อมูลพฤติกรรม', body);
 }
 
-function getDisciplineDocHtml(caseId, docType) {
+function getDisciplineDocHtml(caseId, docType, username) {
   try {
-    const res = getDisciplineCaseDetail(caseId);
+    const res = getDisciplineCaseDetail(caseId, username);
     if (res.status !== 'success') throw new Error(res.message);
     const { case: cData, config: cfg, advisor } = res.data;
 

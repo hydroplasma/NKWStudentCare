@@ -424,6 +424,13 @@ function logout() {
     cancelButtonColor: '#ef4444'
   }).then(r => {
     if (r.isConfirmed) {
+      const teacher = JSON.parse(localStorage.getItem("teacher") || "null");
+      if (teacher && teacher.sessionToken) {
+        google.script.run
+          .withFailureHandler(err => console.error('Session revoke failed:', err))
+          .revokeTeacherSession(teacher.sessionToken);
+      }
+
       // 1. ล้างข้อมูลผู้ใช้ออกจากเครื่องให้เกลี้ยง
       localStorage.removeItem("teacher");
       localStorage.removeItem("student");

@@ -109,9 +109,28 @@ async function runCleaningSummary() {
     const res = await runGoogleScript('getCleaningStats', {
       startDate, endDate, classroom_id: classroomId
     });
-    if (res.status !== 'success') throw new Error(res.message);
+    if (!res || res.status !== 'success') throw new Error(res ? res.message : 'ไม่ได้รับข้อมูลจากระบบ');
 
-    renderCleaningSummary(res.data);
+    const data = res.data || {};
+    if ((!Array.isArray(data.studentStats) || data.studentStats.length === 0) &&
+        (!Array.isArray(data.scoreDetails) || data.scoreDetails.length === 0)) {
+      $("#cleaning-summary-empty").text("ไม่พบข้อมูลในช่วงเวลาที่เลือก").show();
+      $("#cleaning-summary-content").addClass("hidden");
+      Swal.fire({
+        icon: 'info',
+        title: 'ไม่พบข้อมูล',
+        text: 'ไม่มีข้อมูลการเช็คเขตพื้นที่ในช่วงวันที่เลือก กรุณาตรวจสอบว่ามีการบันทึกข้อมูลในช่วงนี้แล้วหรือยัง',
+        confirmButtonText: 'ตกลง'
+      });
+      return;
+    }
+
+    try {
+      renderCleaningSummary(data);
+    } catch (renderError) {
+      console.error('Render Error:', renderError);
+      throw new Error('ดึงข้อมูลสำเร็จ แต่แสดงผลไม่สำเร็จ: ' + renderError.message);
+    }
     $("#cleaning-summary-empty").hide();
     $("#cleaning-summary-content").removeClass("hidden");
   } catch (error) {
@@ -122,7 +141,14 @@ async function runCleaningSummary() {
   }
 }
 
+function getCleaningSummaryClassrooms() {
+  if (typeof ALL_CLASSROOMS !== 'undefined' && Array.isArray(ALL_CLASSROOMS)) return ALL_CLASSROOMS;
+  return Array.isArray(window.ALL_CLASSROOMS) ? window.ALL_CLASSROOMS : [];
+}
+
 function renderCleaningSummary(data) {
+  data = data || {};
+  const classrooms = getCleaningSummaryClassrooms();
   $("#clean-stat-avg").text((data.avgScore || 0) + '%');
   $("#clean-stat-total").text((data.scoreDetails || []).length);
 
@@ -139,7 +165,7 @@ function renderCleaningSummary(data) {
     const avg = roomScores[room].reduce((a, b) => a + b, 0) / roomScores[room].length;
     if (avg > topAvg) {
       topAvg = avg;
-      const found = ALL_CLASSROOMS.find(c => c.id === room);
+      const found = classrooms.find(c => String(c.id) === String(room));
       topRoom = found ? found.name : room;
     }
   }
@@ -176,7 +202,7 @@ function renderCleaningSummary(data) {
     detailTbody.append('<tr><td colspan="4" class="text-center p-4 text-gray-400">ไม่มีข้อมูล</td></tr>');
   } else {
     data.scoreDetails.forEach(d => {
-      const roomName = (ALL_CLASSROOMS.find(c => c.id === d.classroom_id) || {}).name || d.classroom_id;
+      const roomName = (classrooms.find(c => String(c.id) === String(d.classroom_id)) || {}).name || d.classroom_id;
       detailTbody.append(`
         <tr class="border-b border-gray-100 hover:bg-blue-50">
           <td class="p-3 text-gray-600">${formatThaiDateShort(d.date)}</td>
@@ -194,6 +220,7 @@ function renderCleaningSummary(data) {
 }
 
 function renderCleaningCharts(studentStats, scoreDetails) {
+  const classrooms = getCleaningSummaryClassrooms();
   // Pie: ทำ/ไม่ทำ/ลา
   let done = 0, notDone = 0, leave = 0;
   (studentStats || []).forEach(s => {
@@ -234,7 +261,7 @@ function renderCleaningCharts(studentStats, scoreDetails) {
   const roomValues = [];
   Object.keys(roomBuckets).sort().forEach(rid => {
     const avg = roomBuckets[rid].reduce((a, b) => a + b, 0) / roomBuckets[rid].length;
-    const found = ALL_CLASSROOMS.find(c => c.id === rid);
+    const found = classrooms.find(c => String(c.id) === String(rid));
     roomLabels.push(found ? found.name : rid);
     roomValues.push(avg.toFixed(1));
   });
@@ -259,34 +286,43 @@ function renderCleaningCharts(studentStats, scoreDetails) {
 
 function renderCleaningStudentList(students) {
   const tbody = $("#clean-student-list");
+  const classrooms = getCleaningSummaryClassrooms();
   tbody.empty();
 
-  if (!students || students.length === 0) {
+  if (!Array.isArray(students) || students.length === 0) {
     tbody.append('<tr><td colspan="8" class="text-center p-4 text-gray-400">ไม่มีข้อมูล</td></tr>');
     return;
   }
 
   students.forEach(s => {
-    const roomName = (ALL_CLASSROOMS.find(c => c.id === s.classroom_id) || {}).name || s.classroom_id;
-    const safeName = (s.name || '').replace(/'/g, "\\'");
+    const studentId = String(s.student_id == null ? '' : s.student_id);
+    const studentName = String(s.name || '');
+    const roomId = String(s.classroom_id == null ? '' : s.classroom_id);
+    const roomName = (classrooms.find(c => String(c.id) === roomId) || {}).name || roomId;
 
     tbody.append(`
       <tr class="border-b border-gray-100 hover:bg-blue-50">
         <td class="p-3 text-center text-gray-600 text-sm">${escapeHtml(roomName)}</td>
-        <td class="p-3 text-center text-gray-600 text-sm">${s.student_id}</td>
-        <td class="p-3 text-gray-800 text-sm font-medium">${escapeHtml(s.name)}</td>
-        <td class="p-3 text-center font-bold text-emerald-600">${s.done}</td>
-        <td class="p-3 text-center font-bold text-rose-600">${s.not_done}</td>
-        <td class="p-3 text-center font-bold text-blue-600">${s.leave}</td>
-        <td class="p-3 text-center font-bold bg-gray-100">${s.total}</td>
+        <td class="p-3 text-center text-gray-600 text-sm">${escapeHtml(studentId)}</td>
+        <td class="p-3 text-gray-800 text-sm font-medium">${escapeHtml(studentName)}</td>
+        <td class="p-3 text-center font-bold text-emerald-600">${Number(s.done) || 0}</td>
+        <td class="p-3 text-center font-bold text-rose-600">${Number(s.not_done) || 0}</td>
+        <td class="p-3 text-center font-bold text-blue-600">${Number(s.leave) || 0}</td>
+        <td class="p-3 text-center font-bold bg-gray-100">${Number(s.total) || 0}</td>
         <td class="p-3 text-center">
-          <button onclick="viewCleaningStudentDetail('${s.student_id}', '${safeName}')"
-                  class="px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-bold hover:bg-blue-200 active:scale-95">
+          <button type="button"
+                  class="view-cleaning-student-detail px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-bold hover:bg-blue-200 active:scale-95"
+                  data-student-id="${escapeHtml(studentId)}"
+                  data-student-name="${escapeHtml(studentName)}">
             👁️
           </button>
         </td>
       </tr>
     `);
+  });
+
+  tbody.off('click', '.view-cleaning-student-detail').on('click', '.view-cleaning-student-detail', function() {
+    viewCleaningStudentDetail($(this).attr('data-student-id'), $(this).attr('data-student-name'));
   });
 }
 
@@ -1403,7 +1439,11 @@ function buildSummaryReportHtml(data, schoolName, rangeText) {
 async function openDisciplineForStudent(studentId, studentName) {
   $.LoadingOverlay("show", { text: "กำลังค้นหาเคส..." });
   try {
-    const res = await runGoogleScript('getDisciplineCases', { search: studentId });
+    const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
+    const res = await runGoogleScript('getDisciplineCases', {
+      search: studentId,
+      username: teacher.username || ''
+    });
     const cases = (res.status === 'success' && res.data.cases) || [];
     const active = cases.find(c => c.stage !== 'closed');
 
@@ -1485,7 +1525,9 @@ function initDiscipline() {
 async function loadDisciplineCases() {
   $.LoadingOverlay("show", { text: "กำลังโหลดเคส..." });
   try {
+    const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
     const filter = {
+      username: teacher.username || "",
       stage: discState.currentStage,
       classroom: $("#disc-classroom").val() || "",
       search: $("#disc-search").val() || ""
@@ -1606,7 +1648,9 @@ function renderDisciplineCharts(cases, stats) {
 async function exportDisciplineCsv() {
   $.LoadingOverlay("show", { text: "กำลังสร้าง CSV..." });
   try {
+    const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
     const filter = {
+      username: teacher.username || "",
       stage: discState.currentStage,
       classroom: $("#disc-classroom").val() || "",
       search: $("#disc-search").val() || ""
@@ -1705,7 +1749,8 @@ async function openDisciplineCase(caseId) {
   discState.currentCaseId = caseId;
   $.LoadingOverlay("show");
   try {
-    const res = await runGoogleScript('getDisciplineCaseDetail', caseId);
+    const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
+    const res = await runGoogleScript('getDisciplineCaseDetail', caseId, teacher.username || '');
     if (res.status !== 'success') throw new Error(res.message);
     discState.currentDetail = res.data;
     renderCaseDetail(res.data);
@@ -2036,7 +2081,8 @@ async function printDisciplineDoc(docType) {
       } catch (e) { /* ignore */ }
     }
 
-    const res = await runGoogleScript('getDisciplineDocHtml', discState.currentCaseId, docType);
+    const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
+    const res = await runGoogleScript('getDisciplineDocHtml', discState.currentCaseId, docType, teacher.username || '');
     if (res.status !== 'success') throw new Error(res.message);
 
     const win = window.open('', '_blank');

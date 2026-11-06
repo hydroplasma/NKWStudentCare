@@ -486,7 +486,7 @@
     });
 
     // === 5. บันทึก (แก้ไขย้อนหลังได้) ===
-        $('#save-subject-attendance-btn').click(function() {
+    $('#save-subject-attendance-btn').click(function() {
       if (!selectedSchedule) {
         Swal.fire('กรุณาเลือกคาบสอน', '', 'warning');
         return;
@@ -494,28 +494,43 @@
 
       const date = $('#subject-date').val() || currentDateStr;
       const teacher = JSON.parse(localStorage.getItem('teacher') || '{}');
-      const teacherEmail = teacher.email || teacher.username;
+      if (!teacher.sessionToken) {
+        Swal.fire('เซสชันหมดอายุ', 'กรุณาออกจากระบบแล้วเข้าสู่ระบบใหม่ก่อนบันทึก', 'warning');
+        return;
+      }
 
       const studentsPayload = [];
       const seen = new Set();
+      const studentRows = $('#subject-student-tbody tr').filter(function() {
+        return $(this).find('.status-radio').length > 0;
+      });
+      let invalidRows = 0;
 
-      // ดึงค่าจากปุ่มที่ถูกเลือก
-      $('.student-attend-status').each(function() {
-        const sid = String($(this).data('student-id'));
-        if (seen.has(sid)) return;
+      studentRows.each(function() {
+        const row = $(this);
+        const selectedStatus = row.find('.status-radio:checked').first();
+        const sid = String(selectedStatus.attr('data-student-id') || '').trim();
+        if (!selectedStatus.length || !sid || seen.has(sid)) {
+          invalidRows++;
+          return;
+        }
         seen.add(sid);
 
-        const status = $(this).val();
-        const row = $(this).closest('tr');
+        const status = selectedStatus.val();
         const note = row.find('.student-attend-note').val() || '';
-        const rowTexts = row.find('td');
-const studentName = rowTexts.eq(1).text().trim(); 
+        const studentName = row.find('td').eq(1).text().trim();
 
         studentsPayload.push({ student_id: sid, name: studentName, status, note });
       });
 
-      if (studentsPayload.length === 0) {
+      console.log('Payload:', studentsPayload);
+
+      if (studentRows.length === 0) {
         Swal.fire('ไม่มีข้อมูลนักเรียน', 'กรุณาโหลดรายชื่อก่อนบันทึก', 'warning');
+        return;
+      }
+      if (invalidRows > 0 || studentsPayload.length !== studentRows.length) {
+        Swal.fire('เลือกสถานะไม่ครบ', 'กรุณาตรวจสอบสถานะของนักเรียนทุกแถวก่อนบันทึก', 'warning');
         return;
       }
 
@@ -523,12 +538,15 @@ const studentName = rowTexts.eq(1).text().trim();
         date: date,
         subjectCode: selectedSchedule.subjectCode,
         subjectName: selectedSchedule.subjectName,
-        teacherEmail: teacherEmail,
+        sessionToken: teacher.sessionToken,
         gradeLevel: selectedSchedule.gradeLevel,
         room: selectedSchedule.room,
+        classroomId: selectedSchedule.classroomId,
         students: studentsPayload
       };
 
+      const saveButton = $('#save-subject-attendance-btn');
+      saveButton.prop('disabled', true);
       Swal.fire({
         title: 'กำลังบันทึก...',
         allowOutsideClick: false,
@@ -541,6 +559,7 @@ const studentName = rowTexts.eq(1).text().trim();
           console.log('Save Response:', res); // ดูใน Console ว่าหลังบ้านตอบอะไรกลับมา
           
           if (res && res.status === 'success') {
+            saveButton.prop('disabled', false);
             Swal.fire({
               title: 'สำเร็จ',
               html: `${res.message || 'บันทึกเรียบร้อย'}<br><small class="text-gray-500">${formatDateThai(date)}</small>`,
@@ -552,14 +571,16 @@ const studentName = rowTexts.eq(1).text().trim();
               if (selectedSchedule) loadClassroomStudents(selectedSchedule, date);
             });
           } else {
+            saveButton.prop('disabled', false);
             Swal.close();
             Swal.fire('เกิดข้อผิดพลาด', res ? res.message : 'ไม่สามารถบันทึกได้', 'error');
           }
         })
         .withFailureHandler(function(err) {
           console.error('Save Error:', err);
+          saveButton.prop('disabled', false);
           Swal.close();
-          Swal.fire('ผิดพลาด', err.message, 'error');
+          Swal.fire('ผิดพลาด', err && err.message ? err.message : 'ไม่สามารถเชื่อมต่อเพื่อบันทึกได้', 'error');
         })
         .saveSubjectAttendance(JSON.stringify(payload));
     });
